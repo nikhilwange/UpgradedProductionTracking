@@ -109,6 +109,7 @@ const DataTable: React.FC<DataTableProps> = ({ entries, onDelete, isAdmin }) => 
         (r.productLine || '').toLowerCase().includes(q) ||
         (r.model || '').toLowerCase().includes(q) || 
         (r.serialNo || '').toLowerCase().includes(q) ||
+        (r.unitSrNo || '').toLowerCase().includes(q) ||
         (r.activity || '').toLowerCase().includes(q) ||
         (r.rowAffectedParameter || '').toLowerCase().includes(q) ||
         (r.rowDefectCategory || '').toLowerCase().includes(q) ||
@@ -156,7 +157,7 @@ const DataTable: React.FC<DataTableProps> = ({ entries, onDelete, isAdmin }) => 
   }, [entries, searchQuery, startDate, endDate]);
 
   const handleExport = () => {
-    let headers: string[] = ['Entry Date', 'Prod Date', 'Shift', 'Stage', 'Product Line', 'Model', 'Serial Number', 'Activity', 'Shift Start Time', 'Shift End Time', 'Status', 'Inter-Activity Loss (H)', 'Activity Loss (H)', 'Actual Mins', 'Parameter', 'Defect', 'Description'];
+    let headers: string[] = ['Entry Date', 'Prod Date', 'Shift', 'Stage', 'Product Line', 'Model', 'Unit Sr No', 'Serial Number', 'Activity', 'Shift Start Time', 'Shift End Time', 'Status', 'Inter-Activity Loss (H)', 'Activity Loss (H)', 'Actual Mins', 'Parameter', 'Defect', 'Description'];
     let csvRows: string[] = [];
     if (viewMode === 'records') {
       csvRows = filteredFlattenedRecords.map(r => [
@@ -166,6 +167,7 @@ const DataTable: React.FC<DataTableProps> = ({ entries, onDelete, isAdmin }) => 
         toTitleCase(r.stage),
         r.productLine,
         r.model,
+        r.unitSrNo,
         r.serialNo,
         toTitleCase(r.activity),
         formatTimeDisplay(r.shiftStartTime),
@@ -219,14 +221,14 @@ const DataTable: React.FC<DataTableProps> = ({ entries, onDelete, isAdmin }) => 
       <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden flex flex-col">
         <div className="overflow-x-auto overflow-y-auto max-h-[calc(100vh-400px)] min-h-[450px] custom-scrollbar">
           {viewMode === 'records' ? (
-            <table className="w-full text-sm table-fixed min-w-[1750px]">
+            <table className="w-full text-sm table-fixed min-w-[1850px]">
               <thead className="bg-slate-50 border-b border-slate-200 sticky top-0 z-20">
                 <tr>
                   <th className="w-24 px-2 py-4 text-center text-[10px] font-bold text-slate-500 uppercase tracking-wider bg-slate-50">Entry Date</th>
                   <th className="w-24 px-2 py-4 text-center text-[10px] font-bold text-slate-500 uppercase tracking-wider bg-slate-50">Prod Date</th>
                   <th className="w-20 px-2 py-4 text-center text-[10px] font-bold text-slate-500 uppercase tracking-wider bg-slate-50">Shift</th>
                   <th className="w-24 px-2 py-4 text-center text-[10px] font-bold text-slate-500 uppercase tracking-wider bg-slate-50">Stage</th>
-                  <th className="w-32 px-2 py-4 text-center text-[10px] font-bold text-slate-500 uppercase tracking-wider bg-slate-50">Unit Details</th>
+                  <th className="w-40 px-2 py-4 text-center text-[10px] font-bold text-slate-500 uppercase tracking-wider bg-slate-50">Unit Details</th>
                   <th className="w-[180px] px-2 py-4 text-center text-[10px] font-bold text-slate-500 uppercase tracking-wider bg-slate-50">Activity</th>
                   <th className="w-24 px-2 py-4 text-center text-[10px] font-bold text-slate-500 uppercase tracking-wider bg-slate-50">Shift Start</th>
                   <th className="w-24 px-2 py-4 text-center text-[10px] font-bold text-slate-500 uppercase tracking-wider bg-slate-50">Shift End</th>
@@ -247,7 +249,13 @@ const DataTable: React.FC<DataTableProps> = ({ entries, onDelete, isAdmin }) => 
                     <td className="px-2 py-3 text-center font-mono text-[10px] text-slate-500 whitespace-nowrap">{formatDate(row.displayDate)}</td>
                     <td className="px-2 py-3 text-center"><span className={`px-2 py-0.5 rounded text-[9px] font-black tracking-widest ${row.displayShift === 'Shift 2' ? 'bg-amber-50 text-amber-600 border border-amber-100' : 'bg-blue-50 text-blue-600 border-blue-100'}`}>{row.displayShift || 'S1'}</span></td>
                     <td className="px-2 py-3 text-center"><span className="text-[10px] font-bold text-slate-600">{toTitleCase(row.stage)}</span></td>
-                    <td className="px-2 py-3 text-center"><div className="flex flex-col leading-tight"><span className="text-[10px] font-black text-slate-900">{row.model}</span><span className="text-[9px] text-slate-400 font-mono font-bold tracking-tighter">SN: {row.serialNo}</span></div></td>
+                    <td className="px-2 py-3 text-center">
+                      <div className="flex flex-col leading-tight">
+                        <span className="text-[10px] font-black text-slate-900">{row.model}</span>
+                        <span className="text-[9px] text-blue-600 font-black tracking-tighter">Unit: {row.unitSrNo || '—'}</span>
+                        <span className="text-[9px] text-slate-400 font-mono font-bold tracking-tighter">SN: {row.serialNo}</span>
+                      </div>
+                    </td>
                     <td className="px-2 py-3 text-center"><p className={`text-[10px] font-bold leading-tight ${row.isGap ? 'text-purple-600' : 'text-slate-600'} truncate`}>{toTitleCase(row.activity)}</p></td>
                     <td className="px-2 py-3 text-center font-mono text-[10px] text-slate-900 font-bold">{formatTimeDisplay(row.shiftStartTime)}</td>
                     <td className="px-2 py-3 text-center font-mono text-[10px] text-slate-900 font-bold">{formatTimeDisplay(row.shiftEndTime)}</td>

@@ -12,8 +12,8 @@ import { Html5QrcodeScanner } from 'html5-qrcode';
 // Shift Boundaries
 const S1_START = 420;  // 07:00
 const S1_END = 930;    // 15:30
-const S2_START = 900;  // 15:00 (Aligned with production handover)
-const S2_END = 1410;   // 23:30 (Requirement: Strictly 23:30)
+const S2_START = 900;  // 15:00
+const S2_END = 1410;   // 23:30
 
 interface OperatorEntryProps {
   onAddEntry: (entries: ProductionEntry | ProductionEntry[]) => void;
@@ -126,6 +126,7 @@ const FormDateTimeInput: React.FC<{
 
 const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries }) => {
   const [serialNo, setSerialNo] = useState('');
+  const [unitSrNo, setUnitSrNo] = useState('');
   const [activeInProgressEntry, setActiveInProgressEntry] = useState<ProductionEntry | null>(null);
   const [isScanning, setIsScanning] = useState<'scan' | null>(null);
   const scannerRef = useRef<Html5QrcodeScanner | null>(null);
@@ -294,7 +295,8 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries }) =>
             productLine: inProgress.product_line,
             model: inProgress.model,
             serialNo: inProgress.serial_no,
-            soSqNo: inProgress.so_sq_no,
+            unitSrNo: inProgress.unit_sr_no || '',
+            soSqNo: inProgress.so_sq_no || '',
             productionDate: inProgress.production_date,
             shift: inProgress.shift || 'Shift 1',
             startTime: inProgress.start_time,
@@ -318,7 +320,8 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries }) =>
           setStage(inProgress.station);
           setProductLine(inProgress.product_line);
           setModel(inProgress.model);
-          setSoSqNo(inProgress.so_sq_no);
+          setUnitSrNo(inProgress.unit_sr_no || '');
+          setSoSqNo(inProgress.so_sq_no || '');
           setProductionDate(inProgress.production_date);
           setStartTime(inProgress.start_time);
           const now = new Date();
@@ -438,11 +441,34 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries }) =>
   };
 
   const handleScanResult = (text: string) => {
-    const parts = text.split('|');
-    const scannedSN = parts[0].trim();
-    setSerialNo(scannedSN);
-    if (parts.length > 1) { const scannedModel = parts[1].trim(); if (MODELS_LIST.includes(scannedModel)) setModel(scannedModel); }
-    if (parts.length > 2) { const scannedLine = parts[2].trim(); if (PRODUCT_LINES_LIST.includes(scannedLine)) setProductLine(scannedLine); }
+    const parts = text.split('|').map(p => p.trim());
+    
+    // Auto-capture Date and Time of Scanning Event
+    const now = new Date();
+    const dateStr = now.toISOString().split('T')[0];
+    const timeStr = now.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+
+    if (parts.length >= 5) {
+      // ORDER: UNIT_SR_NO | SERIAL_NO | MODEL | PRODUCT_LINE | SO_SQ_NO
+      setUnitSrNo(parts[0]);
+      setSerialNo(parts[1]);
+      if (MODELS_LIST.includes(parts[2])) setModel(parts[2]);
+      if (PRODUCT_LINES_LIST.includes(parts[3])) setProductLine(parts[3]);
+      setSoSqNo(parts[4]);
+    } else if (parts.length === 4) {
+      // LEGACY ORDER: SERIAL_NO | MODEL | PRODUCT_LINE | SO_SQ_NO
+      setSerialNo(parts[0]);
+      if (MODELS_LIST.includes(parts[1])) setModel(parts[1]);
+      if (PRODUCT_LINES_LIST.includes(parts[2])) setProductLine(parts[2]);
+      setSoSqNo(parts[3]);
+    } else {
+      setSerialNo(parts[0]);
+    }
+
+    // Capture the time of event automatically
+    setProductionDate(dateStr);
+    setStartTime(timeStr);
+    setEndTime(timeStr);
   };
 
   const stopScanner = () => {
@@ -475,7 +501,7 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries }) =>
           entriesToSave.push({
             id: getUUID(),
             stage: "Idle / Transition",
-            productLine, model, serialNo, soSqNo,
+            productLine, model, serialNo, unitSrNo, soSqNo,
             productionDate: lastLog.endDate, endDate: productionDate,
             shift: 'Shift 1', activity: "Inter-Activity Idle Time",
             manpower: 1, manpowerNames: [], assignments: [],
@@ -495,7 +521,7 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries }) =>
         // CREATE NEW "IN PROGRESS" RECORD
         entriesToSave.push({
           id: getUUID(),
-          stage, productLine, model, serialNo, soSqNo,
+          stage, productLine, model, serialNo, unitSrNo, soSqNo,
           productionDate, endDate: productionDate,
           shift: multiDaySplits[0]?.shift || 'Shift 1',
           activity, manpower: 0, manpowerNames: [], assignments: [],
@@ -509,16 +535,14 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries }) =>
         });
       } else {
         // FINISH EXISTING RECORD
-        // Use the first split to overwrite the existing "In Progress" entry if possible
         multiDaySplits.forEach((split, idx) => {
           const key = `${split.date}-${split.shift}`;
           const input = assignmentInputs[key];
           const allocatedLoss = (split.minutes / (totalActual || 1)) * lossHours;
           
           entriesToSave.push({
-            // Only the first split uses the old ID to update the record. Others get new IDs.
             id: idx === 0 ? activeInProgressEntry.id : getUUID(),
-            stage, productLine, model, serialNo, soSqNo,
+            stage, productLine, model, serialNo, unitSrNo, soSqNo,
             productionDate: split.date, endDate: endDate,
             shift: split.shift, activity,
             manpower: input.count, manpowerNames: input.operators,
@@ -547,7 +571,7 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries }) =>
 
       await onAddEntry(entriesToSave);
       if (!activeInProgressEntry || entriesToSave.some(e => e.status === 'Completed')) {
-        setSerialNo(''); setSoSqNo(''); setAssignmentInputs({}); 
+        setSerialNo(''); setUnitSrNo(''); setSoSqNo(''); setAssignmentInputs({}); 
         setIdleGapMinutes(0); setIdleAttribution({ affectedParameter: '', defectCategory: '', issueDescription: '' });
         setActiveInProgressEntry(null);
       }
@@ -585,21 +609,21 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries }) =>
         <form onSubmit={handleSubmit} className="p-8 space-y-8">
           <div className="flex justify-center pb-4"><button type="button" onClick={startScanner} className="flex items-center gap-3 px-8 py-4 bg-blue-600 text-white rounded-2xl font-black text-sm uppercase tracking-widest hover:bg-blue-700 shadow-xl shadow-blue-500/20 active:scale-95 transition-all"><Scan size={20} /> Barcode Scan Unit</button></div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-7 gap-4">
              <div className="space-y-2"><label className="text-sm font-bold">Commencement Date</label><FormDateTimeInput type="date" value={productionDate} onChange={setProductionDate} disabled={!!activeInProgressEntry} /></div>
              <div className="space-y-2"><label className="text-sm font-bold">Shift Indicator</label><div className="px-4 py-2 bg-slate-50 border border-slate-100 rounded-[1.5rem] text-sm font-black text-blue-600 shadow-inner flex items-center justify-center">{activeInProgressEntry ? activeInProgressEntry.shift : (multiDaySplits[0]?.shift || 'Shift 1')}</div></div>
              <div className="space-y-2"><label className="text-sm font-bold">Unit Model</label><select value={model} onChange={(e) => setModel(e.target.value)} disabled={!!activeInProgressEntry} className="w-full px-4 py-2 bg-white border border-slate-200 rounded-[1.5rem] text-sm font-bold shadow-sm text-[#002060]">{MODELS_LIST.map(m => <option key={m} value={m}>{m}</option>)}</select></div>
              <div className="space-y-2"><label className="text-sm font-bold">Product Line</label><select value={productLine} onChange={(e) => setProductLine(e.target.value)} disabled={!!activeInProgressEntry} className="w-full px-4 py-2 bg-white border border-slate-200 rounded-[1.5rem] text-sm font-bold shadow-sm text-[#002060]">{PRODUCT_LINES_LIST.map(pl => <option key={pl} value={pl}>{pl}</option>)}</select></div>
+             <div className="space-y-2"><label className="text-sm font-bold">Unit Sr. No.</label><input type="text" value={unitSrNo} onChange={(e) => setUnitSrNo(e.target.value)} placeholder="Unit SN..." className="w-full px-4 py-2 bg-white border border-slate-200 rounded-[1.5rem] text-sm font-bold shadow-sm text-[#002060]" /></div>
              <div className="space-y-2"><label className="text-sm font-bold">Serial Number</label><div className="relative"><input type="text" list="serial-no-list" value={serialNo} onChange={(e) => setSerialNo(e.target.value)} placeholder="SN..." className="w-full pl-4 py-2 bg-white border border-slate-200 rounded-[1.5rem] text-sm font-bold shadow-sm text-[#002060]" required />{isFetchingLastLog && <Loader2 size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-blue-500 animate-spin" />}<datalist id="serial-no-list">{SERIAL_NUMBERS_LIST.map(sn => <option key={sn} value={sn} />)}</datalist></div></div>
-             <div className="space-y-2"><label className="text-sm font-bold">SO / SQ Number</label><input type="text" value={soSqNo} onChange={(e) => setSoSqNo(e.target.value)} disabled={!!activeInProgressEntry} placeholder="SO-0000" className="w-full px-4 py-3 bg-white border border-slate-200 rounded-[1.5rem] text-sm font-bold shadow-sm text-[#002060]" /></div>
+             <div className="space-y-2"><label className="text-sm font-bold">SO / SQ Number</label><input type="text" value={soSqNo} onChange={(e) => setSoSqNo(e.target.value)} placeholder="SO-0000" className="w-full px-4 py-2 bg-white border border-slate-200 rounded-[1.5rem] text-sm font-bold shadow-sm text-[#002060]" /></div>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6 bg-slate-50/50 p-6 rounded-2xl border border-slate-100">
-             <div className="space-y-3"><label className="text-sm font-bold">Select Stage</label><select value={stage} onChange={(e) => { const nextStage = e.target.value; setStage(nextStage); setActivity(activeStageMapping[nextStage][0]); }} className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl text-sm font-bold text-[#002060]">{activeStagesList.map(s => <option key={s} value={s}>{s}</option>)}</select></div>
-             <div className="space-y-3"><label className="text-sm font-bold">Production Activity</label><select value={activity} onChange={(e) => setActivity(e.target.value)} className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl text-sm font-bold text-[#002060]">{(activeStageMapping[stage] || []).map(a => <option key={a} value={a}>{a}</option>)}</select></div>
+             <div className="space-y-3"><label className="text-sm font-bold">Select Stage</label><select value={stage} onChange={(e) => { const nextStage = e.target.value; setStage(nextStage); setActivity(activeStageMapping[nextStage][0]); }} disabled={!!activeInProgressEntry} className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl text-sm font-bold text-[#002060]">{activeStagesList.map(s => <option key={s} value={s}>{s}</option>)}</select></div>
+             <div className="space-y-3"><label className="text-sm font-bold">Production Activity</label><select value={activity} onChange={(e) => setActivity(e.target.value)} disabled={!!activeInProgressEntry} className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl text-sm font-bold text-[#002060]">{(activeStageMapping[stage] || []).map(a => <option key={a} value={a}>{a}</option>)}</select></div>
           </div>
 
-          {/* Standard Information Card */}
           <div className="bg-blue-50 border border-blue-100 rounded-2xl p-6 flex items-start gap-4 animate-in fade-in duration-300">
             <div className="p-2 bg-white rounded-xl shadow-sm border border-blue-100 shrink-0">
               <Info className="text-blue-600" size={24} />
@@ -622,7 +646,7 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries }) =>
           {isAlreadyLogged && (
             <div className="bg-amber-50 border border-amber-200 rounded-2xl p-6 flex items-start gap-4 animate-in fade-in duration-300">
               <AlertCircle className="text-amber-500 shrink-0 mt-0.5" size={24} />
-              <div><h4 className="text-sm font-black text-amber-900 leading-tight mb-1">Activity Already Logged</h4><p className="text-xs font-bold text-amber-700/80 leading-relaxed">The activity "{activity}" is already marked as completed for unit {serialNo}.</p></div>
+              <div><h4 className="text-sm font-black text-amber-900 leading-tight mb-1">Activity Already Logged</h4><p className="text-xs font-bold text-emerald-700/80 leading-relaxed">The activity "{activity}" is already marked as completed for unit {serialNo}.</p></div>
             </div>
           )}
 

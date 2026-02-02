@@ -144,12 +144,7 @@ const App: React.FC = () => {
         .select('*')
         .order('created_at', { ascending: false });
 
-      if (error) {
-        if (error.message?.includes('JWT') || error.message?.includes('fetch')) {
-          console.warn("Cloud pull failed, using local cache");
-        }
-        throw error;
-      }
+      if (error) throw error;
 
       if (data) {
         const mappedData: ProductionEntry[] = data.map(item => ({
@@ -158,6 +153,7 @@ const App: React.FC = () => {
           productLine: item.product_line || '',
           model: item.model || '',
           serialNo: item.serial_no || '',
+          unitSrNo: item.unit_sr_no || '',
           soSqNo: item.so_sq_no || '',
           productionDate: item.production_date || '',
           endDate: item.end_date,
@@ -187,7 +183,7 @@ const App: React.FC = () => {
         setEntries(mappedData);
       }
     } catch (e: any) {
-      console.warn("Cloud pull notice:", e.message);
+      console.warn("Sync Issue: Network interrupted. Using offline cache.", e.message);
     } finally {
       setIsSyncing(false);
     }
@@ -211,7 +207,8 @@ const App: React.FC = () => {
           station: newEntry.stage,         
           product_line: newEntry.productLine,
           model: newEntry.model,
-          serial_no: newEntry.serialNo, 
+          serial_no: newEntry.serialNo,
+          unit_sr_no: newEntry.unitSrNo || '',
           so_sq_no: newEntry.soSqNo || '',
           production_date: newEntry.productionDate,
           end_date: newEntry.endDate,
@@ -238,7 +235,6 @@ const App: React.FC = () => {
           user_email: session?.user?.email || 'unknown'
         };
 
-        // Strict numeric ID handling for bigint columns
         if (newEntry.id && !isNaN(Number(newEntry.id))) {
           entryData.id = Number(newEntry.id);
         }
@@ -254,8 +250,8 @@ const App: React.FC = () => {
       }
       fetchCloudData(); 
     } catch (e: any) {
-      console.error("Database sync failure:", e.message);
-      alert(`Terminal Error: ${e.message}`);
+      console.error("Database connection lost:", e.message);
+      alert(`Terminal Sync Failure: Check network connection. Data remains in session cache. Error: ${e.message}`);
     } finally {
       setIsSyncing(false);
     }
@@ -270,6 +266,7 @@ const App: React.FC = () => {
         product_line: updatedEntry.productLine,
         model: updatedEntry.model,
         serial_no: updatedEntry.serialNo,
+        unit_sr_no: updatedEntry.unitSrNo || '',
         so_sq_no: updatedEntry.soSqNo || '',
         production_date: updatedEntry.productionDate,
         end_date: updatedEntry.endDate,
@@ -298,7 +295,7 @@ const App: React.FC = () => {
       fetchCloudData();
     } catch (e: any) {
       console.error("Update failed:", e.message);
-      alert(`System Error: ${e.message}`);
+      alert(`System Error: Could not synchronize updates with cloud. ${e.message}`);
     } finally {
       setIsSyncing(false);
     }
@@ -373,19 +370,19 @@ const App: React.FC = () => {
           </div>
         </div>
         <div className="mt-4 px-3 space-y-1">
-          <NavItem active={activeTab === 'dashboard'} onClick={() => setActiveTab('dashboard')} icon={<LayoutDashboard size={20} />} label="Dashboard" />
-          <NavItem active={activeTab === 'entry'} onClick={() => setActiveTab('entry')} icon={<ClipboardList size={20} />} label="Operator Input" />
-          <NavItem active={activeTab === 'manpower'} onClick={() => setActiveTab('manpower')} icon={<Users size={20} />} label="Manpower Registry" />
+          <NavItem active={activeTab === 'dashboard'} onClick={() => setActiveTab('dashboard'} icon={<LayoutDashboard size={20} />} label="Dashboard" />
+          <NavItem active={activeTab === 'entry'} onClick={() => setActiveTab('entry'} icon={<ClipboardList size={20} />} label="Operator Input" />
+          <NavItem active={activeTab === 'manpower'} onClick={() => setActiveTab('manpower'} icon={<Users size={20} />} label="Manpower Registry" />
           
           {canAccessDatabase && (
-            <NavItem active={activeTab === 'data'} onClick={() => setActiveTab('data')} icon={<Database size={20} />} label="Database View" />
+            <NavItem active={activeTab === 'data'} onClick={() => setActiveTab('data'} icon={<Database size={20} />} label="Database View" />
           )}
           
           {isAdmin && (
             <>
               <div className="mx-4 my-4 h-px bg-slate-800" />
-              <NavItem active={activeTab === 'insights'} onClick={() => setActiveTab('insights')} icon={<Sparkles size={20} />} label="Ai Strategic Insights" />
-              <NavItem active={activeTab === 'admin-manager'} onClick={() => setActiveTab('admin-manager')} icon={<Settings size={20} />} label="System Management" />
+              <NavItem active={activeTab === 'insights'} onClick={() => setActiveTab('insights'} icon={<Sparkles size={20} />} label="Ai Strategic Insights" />
+              <NavItem active={activeTab === 'admin-manager'} onClick={() => setActiveTab('admin-manager'} icon={<Settings size={20} />} label="System Management" />
             </>
           )}
         </div>
@@ -434,6 +431,13 @@ const App: React.FC = () => {
               <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Supabase Cloud Sync</span>
               <span className="text-xs font-bold text-slate-900">{entries.length} Records</span>
             </div>
+            <button 
+              onClick={fetchCloudData}
+              title="Refresh Data"
+              className={`p-2 rounded-lg transition-all ${isSyncing ? 'animate-spin bg-blue-50 text-blue-500' : 'hover:bg-slate-100 text-slate-400'}`}
+            >
+              <RefreshCcw size={16} />
+            </button>
             <div className={`w-3 h-3 rounded-full ${isSyncing ? 'bg-blue-500 animate-pulse' : 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]'}`}></div>
           </div>
         </header>

@@ -17,6 +17,7 @@ export interface ProductionEntry {
   productLine: string;
   model: string;     
   serialNo: string;  
+  unitSrNo: string; // New industrial field
   soSqNo: string;    
   productionDate: string;      
   endDate?: string;  
