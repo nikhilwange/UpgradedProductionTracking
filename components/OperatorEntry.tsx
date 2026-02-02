@@ -106,6 +106,7 @@ const FormDateTimeInput: React.FC<{
 const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plant }) => {
   const [serialNo, setSerialNo] = useState('');
   const [unitSrNo, setUnitSrNo] = useState('');
+  const [userHasSelectedActivity, setUserHasSelectedActivity] = useState(false);
   
   const filteredModels = useMemo(() => {
     if (plant === 'AMBERNATH') {
@@ -284,7 +285,9 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
   useEffect(() => {
     const checkStatus = async () => {
       const cleanSerial = serialNo.trim();
-      if (cleanSerial.length < 2) { 
+      const cleanActivity = activity.trim();
+      
+      if (cleanSerial.length < 2 || !cleanActivity || !userHasSelectedActivity) { 
         setLastLog(null); 
         setIdleGapMinutes(0); 
         setActiveInProgressEntry(null);
@@ -360,16 +363,16 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
       } catch (err) { setLastLog(null); setIdleGapMinutes(0); } finally { setIsFetchingLastLog(false); }
     };
     checkStatus();
-  }, [serialNo, activity]);
+  }, [serialNo, activity, userHasSelectedActivity]);
 
   useEffect(() => {
-    if (lastLog && startTime && productionDate && !activeInProgressEntry) {
+    if (lastLog && startTime && productionDate && !activeInProgressEntry && userHasSelectedActivity) {
       const prevEndMs = toStandardMs(lastLog.endDate, lastLog.endTime);
       const currStartMs = toStandardMs(productionDate, startTime);
       const available = calculateAvailableGapMins(prevEndMs, currStartMs);
       setIdleGapMinutes(available > 0 ? Math.round(available) : 0);
     } else setIdleGapMinutes(0);
-  }, [lastLog, startTime, productionDate, serialNo, activeInProgressEntry]);
+  }, [lastLog, startTime, productionDate, serialNo, activeInProgressEntry, userHasSelectedActivity]);
 
   useEffect(() => { if (!activeInProgressEntry) setEndDate(productionDate); }, [productionDate, activeInProgressEntry]);
 
@@ -456,9 +459,9 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
 
   const handleScanResult = (text: string) => {
     const parts = text.split('|').map(p => p.trim());
-    const now = new Date();
-    const dateStr = now.toISOString().split('T')[0];
-    const timeStr = now.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+    
+    // Fulfilling requirement: Capture details ONLY. Do not look for activities immediately.
+    setUserHasSelectedActivity(false);
 
     const findMatchingValue = (list: string[], scannedValue: string) => {
       if (!scannedValue) return null;
@@ -483,10 +486,8 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
     } else {
       setSerialNo(parts[0]);
     }
-
-    setProductionDate(dateStr);
-    setStartTime(timeStr);
-    setEndTime(timeStr);
+    
+    // Activity search should be triggered by manual selection later.
   };
 
   const stopScanner = () => {
@@ -670,7 +671,7 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
                  <Tag size={14} className="text-blue-500" /> Serial Number
                </label>
                <div className="relative">
-                 <input type="text" list="serial-no-list" value={serialNo} onChange={(e) => setSerialNo(e.target.value)} placeholder="SN..." className="w-full pl-4 py-2 bg-white border border-slate-200 rounded-[1.5rem] text-sm font-bold shadow-sm text-[#002060]" required />
+                 <input type="text" list="serial-no-list" value={serialNo} onChange={(e) => { setSerialNo(e.target.value); setUserHasSelectedActivity(true); }} placeholder="SN..." className="w-full pl-4 py-2 bg-white border border-slate-200 rounded-[1.5rem] text-sm font-bold shadow-sm text-[#002060]" required />
                  {isFetchingLastLog && <Loader2 size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-blue-500 animate-spin" />}
                  <datalist id="serial-no-list">{SERIAL_NUMBERS_LIST.map(sn => <option key={sn} value={sn} />)}</datalist>
                </div>
@@ -688,7 +689,7 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
                <label className="text-xs font-bold text-slate-500 uppercase flex items-center gap-2 ml-1">
                  <Layout size={14} className="text-blue-500" /> Select Stage
                </label>
-               <select value={stage} onChange={(e) => { const nextStage = e.target.value; setStage(nextStage); setActivity(activeStageMapping[nextStage][0]); }} disabled={!!activeInProgressEntry} className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl text-sm font-bold text-[#002060]">
+               <select value={stage} onChange={(e) => { const nextStage = e.target.value; setStage(nextStage); setActivity(activeStageMapping[nextStage][0]); setUserHasSelectedActivity(true); }} disabled={!!activeInProgressEntry} className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl text-sm font-bold text-[#002060]">
                  {activeStagesList.map(s => <option key={s} value={s}>{s}</option>)}
                </select>
              </div>
@@ -696,7 +697,7 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
                <label className="text-xs font-bold text-slate-500 uppercase flex items-center gap-2 ml-1">
                  <Activity size={14} className="text-blue-500" /> Production Activity
                </label>
-               <select value={activity} onChange={(e) => setActivity(e.target.value)} disabled={!!activeInProgressEntry} className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl text-sm font-bold text-[#002060]">
+               <select value={activity} onChange={(e) => { setActivity(e.target.value); setUserHasSelectedActivity(true); }} disabled={!!activeInProgressEntry} className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl text-sm font-bold text-[#002060]">
                  {(activeStageMapping[stage] || []).map(a => <option key={a} value={a}>{a}</option>)}
                </select>
              </div>
