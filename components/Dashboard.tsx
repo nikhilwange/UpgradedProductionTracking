@@ -3,18 +3,22 @@ import React, { useMemo, useState, useEffect } from 'react';
 import { 
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer 
 } from 'recharts';
-import { TrendingUp, Clock, AlertTriangle, Package, ChevronDown, Activity as ActivityIcon, FileText, Timer, Filter } from 'lucide-react';
+import { TrendingUp, Clock, AlertTriangle, Package, ChevronDown, Activity as ActivityIcon, FileText, Timer, Filter, Globe } from 'lucide-react';
 import { ProductionEntry } from '../types';
 import { ACTIVITIES_LIST, ACTIVITY_STANDARDS, PLANT_REGISTRY } from '../constants';
 
 interface DashboardProps {
   entries: ProductionEntry[];
   plant: string;
+  userRole?: string | null;
 }
 
-const Dashboard: React.FC<DashboardProps> = ({ entries, plant }) => {
+const Dashboard: React.FC<DashboardProps> = ({ entries, plant, userRole }) => {
   const [selectedSerial, setSelectedSerial] = useState<string | null>(null);
+  const [selectedPlantFilter, setSelectedPlantFilter] = useState<string>('All');
   const [selectedModelFilter, setSelectedModelFilter] = useState<string>('All');
+
+  const isGlobal = userRole === 'admin' || userRole === 'management';
 
   const toTitleCase = (str: string) => {
     if (!str) return 'N/A';
@@ -36,82 +40,78 @@ const Dashboard: React.FC<DashboardProps> = ({ entries, plant }) => {
     return `${d}-${m}-${y}`;
   };
 
-  // 1. Filtered entries for aggregate analytics (KPIs and Charts)
-  const filteredEntriesByModel = useMemo(() => {
-    if (selectedModelFilter === 'All') return entries;
-    return entries.filter(e => e.model === selectedModelFilter);
-  }, [entries, selectedModelFilter]);
+  // 1. Filtered entries based on selected Plant and Model
+  const filteredEntries = useMemo(() => {
+    return entries.filter(e => {
+      const plantMatch = selectedPlantFilter === 'All' || e.plant === selectedPlantFilter;
+      const modelMatch = selectedModelFilter === 'All' || e.model === selectedModelFilter;
+      return plantMatch && modelMatch;
+    });
+  }, [entries, selectedPlantFilter, selectedModelFilter]);
 
   const stats = useMemo(() => {
-    if (!filteredEntriesByModel.length) return null;
-    const uniqueUnits = new Set(filteredEntriesByModel.map(e => e.serialNo)).size;
-    const totalManhours = filteredEntriesByModel.reduce((acc, e) => acc + e.manhoursEngaged, 0);
-    const avgVariance = filteredEntriesByModel.reduce((acc, e) => acc + e.variance, 0) / (filteredEntriesByModel.length || 1);
-    const totalLoss = filteredEntriesByModel.reduce((acc, e) => acc + e.lossHours, 0);
+    if (!filteredEntries.length) return null;
+    const uniqueUnits = new Set(filteredEntries.map(e => e.serialNo)).size;
+    const totalManhours = filteredEntries.reduce((acc, e) => acc + e.manhoursEngaged, 0);
+    const avgVariance = filteredEntries.reduce((acc, e) => acc + e.variance, 0) / (filteredEntries.length || 1);
+    const totalLoss = filteredEntries.reduce((acc, e) => acc + e.lossHours, 0);
     return { uniqueUnits, totalManhours, avgVariance, totalLoss };
-  }, [filteredEntriesByModel]);
+  }, [filteredEntries]);
 
-  // Original units list based on all entries for dropdown selection
+  // Units list for the selector
   const unitsList = useMemo(() => {
     const units: Record<string, { 
       serialNo: string; 
       model: string; 
+      plant: string;
       completedActivities: number; 
       lastEntry: ProductionEntry;
       allEntries: ProductionEntry[];
     }> = {};
 
-    [...entries].sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()).forEach(e => {
+    entries.forEach(e => {
       if (!units[e.serialNo]) {
         units[e.serialNo] = { 
           serialNo: e.serialNo, 
           model: e.model, 
+          plant: e.plant,
           completedActivities: 0, 
           lastEntry: e,
           allEntries: [] 
         };
       }
       units[e.serialNo].completedActivities += 1;
-      units[e.serialNo].lastEntry = e;
       units[e.serialNo].allEntries.push(e);
+      if (new Date(e.createdAt).getTime() > new Date(units[e.serialNo].lastEntry.createdAt).getTime()) {
+        units[e.serialNo].lastEntry = e;
+      }
     });
 
     return Object.values(units).sort((a, b) => new Date(b.lastEntry.createdAt).getTime() - new Date(a.lastEntry.createdAt).getTime());
   }, [entries]);
 
-  // Derived filtered list for the unit selector dropdown
+  // Filtered unit dropdown list
   const filteredUnitsList = useMemo(() => {
-    if (selectedModelFilter === 'All') return unitsList;
-    return unitsList.filter(u => u.model === selectedModelFilter);
-  }, [unitsList, selectedModelFilter]);
+    return unitsList.filter(u => {
+      const plantMatch = selectedPlantFilter === 'All' || u.plant === selectedPlantFilter;
+      const modelMatch = selectedModelFilter === 'All' || u.model === selectedModelFilter;
+      return plantMatch && modelMatch;
+    });
+  }, [unitsList, selectedPlantFilter, selectedModelFilter]);
+
+  const availablePlants = useMemo(() => {
+    const plants = new Set(entries.map(e => e.plant));
+    return ['All', ...Array.from(plants).sort()];
+  }, [entries]);
 
   const availableModels = useMemo(() => {
-    const models = new Set(unitsList.map(u => u.model));
+    const relevantEntries = entries.filter(e => selectedPlantFilter === 'All' || e.plant === selectedPlantFilter);
+    const models = new Set(relevantEntries.map(e => e.model));
     const list = Array.from(models).sort();
-    if (plant === 'AMBERNATH') return list;
     return ['All', ...list];
-  }, [unitsList, plant]);
+  }, [entries, selectedPlantFilter]);
 
-  // Handle default filter for Ambernath when "All" is not permitted
-  useEffect(() => {
-    if (plant === 'AMBERNATH' && selectedModelFilter === 'All') {
-      if (availableModels.length > 0) {
-        setSelectedModelFilter(availableModels[0]);
-      }
-    }
-  }, [plant, availableModels, selectedModelFilter]);
-
-  // Dynamic activity list for the pipeline based on model filter
-  const pipelineActivities = useMemo(() => {
-    if (selectedModelFilter === 'LI7') {
-      // Return Li7 flattened activity list (Normalizing to uppercase config for safety)
-      return Object.values(PLANT_REGISTRY.AMBERNATH.models.LI7.mapping).flat() as string[];
-    }
-    // Default to the Chakan NH activity list defined in constants
-    return ACTIVITIES_LIST;
-  }, [selectedModelFilter]);
-
-  // Reset selected serial when filter changes if current selection is no longer valid
+  // Reset filters if context changes
   useEffect(() => {
     if (filteredUnitsList.length > 0) {
       const isStillValid = filteredUnitsList.some(u => u.serialNo === selectedSerial);
@@ -122,6 +122,14 @@ const Dashboard: React.FC<DashboardProps> = ({ entries, plant }) => {
       setSelectedSerial(null);
     }
   }, [filteredUnitsList, selectedSerial]);
+
+  const pipelineActivities = useMemo(() => {
+    if (selectedModelFilter === 'LI7') {
+      return Object.values(PLANT_REGISTRY.AMBERNATH.models.LI7.mapping).flat() as string[];
+    }
+    // For general/mixed pipeline, use the Chakan NH baseline
+    return ACTIVITIES_LIST;
+  }, [selectedModelFilter]);
 
   const selectedUnitDetail = useMemo(() => {
     if (!selectedSerial) return null;
@@ -218,7 +226,7 @@ const Dashboard: React.FC<DashboardProps> = ({ entries, plant }) => {
 
   const benchmarkData = useMemo(() => {
     const activityData: Record<string, { standard: number; actualTotal: number; count: number }> = {};
-    filteredEntriesByModel.forEach(e => {
+    filteredEntries.forEach(e => {
       if (e.status === 'In Progress' && e.manpower === 0) return;
       
       if (!activityData[e.activity]) {
@@ -230,28 +238,24 @@ const Dashboard: React.FC<DashboardProps> = ({ entries, plant }) => {
     return Object.entries(activityData)
       .map(([name, data]) => ({ name, Standard: data.standard, Actual: Math.round(data.actualTotal / data.count) }))
       .slice(0, 5);
-  }, [filteredEntriesByModel]);
+  }, [filteredEntries]);
 
   const bottleneckData = useMemo(() => {
     const losses: Record<string, number> = {};
-    filteredEntriesByModel.forEach(e => {
+    filteredEntries.forEach(e => {
       losses[e.activity] = (losses[e.activity] || 0) + e.lossHours;
     });
     return Object.entries(losses)
       .map(([name, hours]) => ({ name, hours }))
       .sort((a, b) => b.hours - a.hours);
-  }, [filteredEntriesByModel]);
+  }, [filteredEntries]);
 
   const activePipelines = useMemo(() => {
-    const lastSeen: Record<string, { activity: string; model: string }> = {};
-    const filteredEntries = (entries || []).filter(e => !e.isGap && e.activity !== "Inter-Activity Idle Time");
-    const sorted = [...filteredEntries].sort((a: ProductionEntry, b: ProductionEntry) => {
-      const timeA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
-      const timeB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
-      return timeA - timeB;
-    });
-    sorted.forEach((e: ProductionEntry) => {
-      lastSeen[e.serialNo] = { activity: e.activity, model: e.model };
+    const lastSeen: Record<string, { activity: string; model: string; plant: string }> = {};
+    const validEntries = (entries || []).filter(e => !e.isGap && e.activity !== "Inter-Activity Idle Time");
+    
+    [...validEntries].sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()).forEach(e => {
+      lastSeen[e.serialNo] = { activity: e.activity, model: e.model, plant: e.plant };
     });
     return lastSeen;
   }, [entries]);
@@ -270,7 +274,7 @@ const Dashboard: React.FC<DashboardProps> = ({ entries, plant }) => {
   const overallProgress = Math.round((completedActivitiesCount / pipelineActivities.length) * 100);
 
   return (
-    <div className="space-y-8 pb-20">
+    <div className="space-y-8 pb-12">
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         <KPICard icon={<Package className="text-blue-500" />} label="Active Serial Units" value={stats?.uniqueUnits.toString() || '0'} subtext="Unique Serial numbers tracked" />
         <KPICard icon={<Clock className="text-amber-500" />} label="Engaged Manhours" value={stats?.totalManhours.toFixed(1) || '0'} unit="Hrs" subtext="Total labor input" />
@@ -279,23 +283,46 @@ const Dashboard: React.FC<DashboardProps> = ({ entries, plant }) => {
       </div>
 
       <div className="flex flex-col gap-4">
-        <div className="flex items-center gap-2 px-2 overflow-x-auto custom-scrollbar pb-2">
+        <div className="flex flex-wrap items-center gap-4 px-2">
+          {isGlobal && (
+            <div className="flex items-center gap-2 bg-slate-900/5 p-1.5 rounded-2xl border border-slate-200">
+              <div className="p-1.5 bg-white rounded-lg shadow-sm">
+                <Globe size={14} className="text-blue-500" />
+              </div>
+              <div className="flex gap-1">
+                {availablePlants.map((p) => (
+                  <button
+                    key={p}
+                    onClick={() => setSelectedPlantFilter(p)}
+                    className={`px-4 py-1.5 rounded-xl text-[11px] font-black uppercase tracking-wider transition-all ${
+                      selectedPlantFilter === p
+                        ? 'bg-blue-600 text-white shadow-md'
+                        : 'text-slate-500 hover:text-slate-900'
+                    }`}
+                  >
+                    {p}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
           <div className="flex items-center gap-2 bg-slate-100 p-1.5 rounded-2xl border border-slate-200 shadow-sm">
             <div className="p-1.5 bg-white rounded-lg shadow-sm">
               <Filter size={14} className="text-slate-400" />
             </div>
             <div className="flex gap-1">
-              {availableModels.map((model) => (
+              {availableModels.map((m) => (
                 <button
-                  key={model}
-                  onClick={() => setSelectedModelFilter(model)}
+                  key={m}
+                  onClick={() => setSelectedModelFilter(m)}
                   className={`px-4 py-1.5 rounded-xl text-[11px] font-black uppercase tracking-wider transition-all whitespace-nowrap ${
-                    selectedModelFilter === model
-                      ? 'bg-blue-600 text-white shadow-md'
+                    selectedModelFilter === m
+                      ? 'bg-slate-900 text-white shadow-md'
                       : 'text-slate-500 hover:bg-white hover:text-slate-900'
                   }`}
                 >
-                  {model}
+                  {m}
                 </button>
               ))}
             </div>
@@ -310,21 +337,21 @@ const Dashboard: React.FC<DashboardProps> = ({ entries, plant }) => {
               </div>
               <div>
                 <h3 className="text-lg font-bold text-slate-900">Live Production Pipeline</h3>
-                <p className="text-sm text-slate-500">Real-time unit location across all activities</p>
+                <p className="text-sm text-slate-500">Real-time unit tracking for {selectedPlantFilter === 'All' ? 'Full Enterprise' : selectedPlantFilter}</p>
               </div>
             </div>
           </div>
           <div className="relative overflow-x-auto pb-4 custom-scrollbar">
             <div className="flex items-start min-w-[2500px] gap-0 px-4">
               {pipelineActivities.map((act, idx) => {
-                const activeUnits = (Object.entries(activePipelines) as [string, { activity: string; model: string }][])
+                const activeUnits = Object.entries(activePipelines)
                   .filter(([_, data]) => {
-                    const matchesModel = selectedModelFilter === 'All' || data.model.trim().toUpperCase() === selectedModelFilter.trim().toUpperCase();
-                    // Robust Case-Insensitive activity matching
-                    const matchesActivity = data.activity.trim().toUpperCase() === act.trim().toUpperCase();
-                    return matchesActivity && matchesModel;
+                    const plantMatch = selectedPlantFilter === 'All' || data.plant === selectedPlantFilter;
+                    const modelMatch = selectedModelFilter === 'All' || data.model === selectedModelFilter;
+                    const activityMatch = data.activity.trim().toUpperCase() === act.trim().toUpperCase();
+                    return plantMatch && modelMatch && activityMatch;
                   })
-                  .map(([sn, data]) => ({ sn, model: data.model }));
+                  .map(([sn, data]) => ({ sn, model: data.model, plant: data.plant }));
 
                 return (
                   <div key={act} className="flex-1 flex flex-col items-center">
@@ -336,8 +363,11 @@ const Dashboard: React.FC<DashboardProps> = ({ entries, plant }) => {
                       <div className="mt-3 text-center px-2 h-10 text-[10px] font-bold text-slate-500 uppercase tracking-tight line-clamp-2 leading-tight">{act}</div>
                       <div className="mt-4 flex flex-col gap-1.5 w-full items-center min-h-[70px]">
                         {activeUnits.map(unit => (
-                          <button key={unit.sn} onClick={() => setSelectedSerial(unit.sn)} className="px-2.5 py-1.5 bg-blue-50 border border-blue-200 rounded-lg text-[10px] font-bold text-blue-700 whitespace-nowrap hover:bg-blue-100 transition-all flex flex-col items-center shadow-sm">
-                            <span className="opacity-60 text-[8px] uppercase">{unit.model}</span>
+                          <button 
+                            key={unit.sn} 
+                            onClick={() => setSelectedSerial(unit.sn)} 
+                            className="px-2.5 py-1.5 bg-blue-50 border border-blue-200 rounded-lg text-[10px] font-bold text-blue-700 whitespace-nowrap hover:bg-blue-100 transition-all flex flex-col items-center shadow-sm"
+                          >
                             <span>{unit.sn}</span>
                           </button>
                         ))}
@@ -356,7 +386,7 @@ const Dashboard: React.FC<DashboardProps> = ({ entries, plant }) => {
           <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
             <div className="space-y-4">
               <p className="text-[10px] font-black text-blue-600 uppercase tracking-widest">
-                Production Schedule • {selectedUnitDetail?.allEntries.length || 0} Records Found
+                Unit Selection • {filteredUnitsList.length} Records Found
               </p>
               <div className="relative w-full md:w-80">
                 <select 
@@ -365,7 +395,7 @@ const Dashboard: React.FC<DashboardProps> = ({ entries, plant }) => {
                   className="w-full pl-6 pr-10 py-3 bg-white border border-slate-200 rounded-2xl outline-none text-sm font-black text-slate-900 appearance-none focus:border-blue-500 transition-all shadow-sm"
                 >
                   {filteredUnitsList.map(u => (
-                    <option key={u.serialNo} value={u.serialNo}>{u.model} — {u.serialNo}</option>
+                    <option key={u.serialNo} value={u.serialNo}>{u.plant} — {u.model} — {u.serialNo}</option>
                   ))}
                 </select>
                 <ChevronDown size={18} className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
@@ -407,7 +437,7 @@ const Dashboard: React.FC<DashboardProps> = ({ entries, plant }) => {
                         <div className="space-y-1">
                           <span className="text-[10px] font-black text-blue-400 uppercase tracking-widest block ml-1">DATE: {formatDate(node.date)}</span>
                           <div className="flex flex-wrap items-baseline gap-4">
-                            <h4 className="text-xl font-black text-indigo-900 tracking-tight leading-none">{toTitleCase("Inter-Activity Idle Time")}</h4>
+                            <h4 className="text-xl font-black text-indigo-900 tracking-tight leading-none">Inter-Activity Idle Time</h4>
                             <div className="flex items-center gap-1.5 px-3 py-1 bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-full text-[10px] font-black uppercase leading-none">
                               IDLE PHASE
                             </div>
@@ -420,24 +450,6 @@ const Dashboard: React.FC<DashboardProps> = ({ entries, plant }) => {
                         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                           <MetricBox label="Idle Start" value={formatTimeDisplay(node.idleStart)} theme="indigo" />
                           <MetricBox label="Idle End" value={formatTimeDisplay(node.idleEnd)} theme="indigo" />
-                          <div className="hidden md:block" />
-                          <div className="hidden md:block" />
-                        </div>
-                      </div>
-
-                      <div className="lg:w-64 border-t lg:border-t-0 lg:border-l border-indigo-200 pt-6 lg:pt-0 lg:pl-8 flex flex-col gap-5">
-                        <div className="flex items-center gap-2 text-[10px] font-black text-indigo-400 uppercase tracking-[0.2em]">
-                          <Clock size={14} /> Timeline Overview
-                        </div>
-                        <div className="space-y-3">
-                          <div className="flex items-center justify-between">
-                            <span className="text-[11px] font-bold text-indigo-400">Idle Start</span>
-                            <span className="bg-indigo-50 px-3 py-1 rounded-lg text-xs font-black mono text-indigo-900">{formatTimeDisplay(node.idleStart)}</span>
-                          </div>
-                          <div className="flex items-center justify-between">
-                            <span className="text-[11px] font-bold text-indigo-400">Idle End</span>
-                            <span className="bg-indigo-50 px-3 py-1 rounded-lg text-xs font-black mono text-indigo-900">{formatTimeDisplay(node.idleEnd)}</span>
-                          </div>
                         </div>
                       </div>
                     </div>
@@ -447,11 +459,8 @@ const Dashboard: React.FC<DashboardProps> = ({ entries, plant }) => {
             }
 
             const group = node;
-            const firstShift = group.shifts[0];
             const isCompleted = group.shifts.every((s: ProductionEntry) => s.status === 'Completed');
-            
-            const lossReasons = [...new Set(group.shifts.map((s: ProductionEntry) => s.lossReason).filter((r: string) => r && r !== 'Standard Operation' && r !== 'Completed'))];
-            const displayLossReason = lossReasons.length > 0 ? lossReasons.join(', ') : 'Standard Operation';
+            const lossReasons = [...new Set(group.shifts.map((s: ProductionEntry) => s.lossReason).filter((r: string) => r && r !== 'Standard Operation'))];
 
             return (
               <div key={group.activityName} className="relative z-10 flex gap-6 group">
@@ -465,63 +474,32 @@ const Dashboard: React.FC<DashboardProps> = ({ entries, plant }) => {
                   isCompleted ? 'border-slate-100 shadow-sm opacity-90' : 'border-blue-200 shadow-lg ring-4 ring-blue-50'
                 } hover:border-blue-200 relative overflow-hidden`}>
                   
-                  {group.isParallel && (
-                    <div className="absolute top-0 right-0 px-4 py-1.5 bg-blue-600 text-white text-[9px] font-black tracking-widest uppercase rounded-bl-2xl shadow-lg z-20">
-                      Parallel Activity
-                    </div>
-                  )}
-
                   <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
                     <div className="flex-1 space-y-4">
                       <div className="space-y-1">
                         <span className="text-[10px] font-black text-blue-400 uppercase tracking-widest block ml-1">DATE: {formatDate(group.date)}</span>
                         <div className="flex flex-wrap items-baseline gap-4">
                           <h4 className="text-xl font-black text-slate-900 tracking-tight leading-none">{toTitleCase(group.activityName)}</h4>
-                          <span className="text-[11px] font-bold text-slate-400 leading-none">Activity cycle: {ACTIVITY_STANDARDS[group.activityName] || firstShift.standardCycleTime} min</span>
                           {lossReasons.length > 0 && (
                             <div className="flex items-center gap-1.5 px-3 py-1 bg-amber-50 text-amber-700 border border-amber-100 rounded-full text-[10px] font-black uppercase leading-none">
-                              <AlertTriangle size={12} /> LOSS REASON: {displayLossReason.toUpperCase()}
+                              <AlertTriangle size={12} /> LOSS: {lossReasons.join(', ').toUpperCase()}
                             </div>
                           )}
                         </div>
                       </div>
 
                       <div className="space-y-4">
-                        {group.shifts.map((entry: ProductionEntry, shiftIdx: number) => {
-                          const shiftLabel = entry.shift === 'Shift 1' ? 'S1' : entry.shift === 'Shift 2' ? 'S2' : entry.shift === 'Shift 3' ? 'S3' : `S${shiftIdx + 1}`;
-                          const showSLabel = group.shifts.length > 1;
-
-                          return (
-                            <div key={entry.id} className={`flex items-center gap-4 ${shiftIdx > 0 ? 'pt-4 border-t border-slate-50' : ''}`}>
-                              {showSLabel && (
-                                <div className="w-8 flex-shrink-0 text-[10px] font-bold text-slate-400 uppercase tracking-widest text-center" title={entry.shift}>
-                                  {shiftLabel}
-                                </div>
-                              )}
-                              <div className="flex-1 grid grid-cols-2 md:grid-cols-4 gap-3">
-                                <MetricBox label="Manpower" value={`${entry.manpower} Oper`} />
-                                <MetricBox label="Planned MH" value={`${((entry.standardCycleTime / 60) * entry.manpower).toFixed(1)} hrs`} />
-                                <MetricBox label="Curr MH" value={`${(entry.manhoursEngaged || 0).toFixed(1)} hrs`} />
-                                <MetricBox label="Efficiency" value={`${Math.round((entry.standardCycleTime / (entry.actualCycleTime || 1)) * 100)}%`} />
-                              </div>
+                        {group.shifts.map((entry: ProductionEntry, shiftIdx: number) => (
+                          <div key={entry.id} className={`flex items-center gap-4 ${shiftIdx > 0 ? 'pt-4 border-t border-slate-50' : ''}`}>
+                            <div className="flex-1 grid grid-cols-2 md:grid-cols-4 gap-3">
+                              <MetricBox label="Manpower" value={`${entry.manpower} Oper`} />
+                              <MetricBox label="Planned MH" value={`${((entry.standardCycleTime / 60) * entry.manpower).toFixed(1)}h`} />
+                              <MetricBox label="Actual MH" value={`${(entry.manhoursEngaged || 0).toFixed(1)}h`} />
+                              <MetricBox label="Efficiency" value={`${Math.round((entry.standardCycleTime / (entry.actualCycleTime || 1)) * 100)}%`} />
                             </div>
-                          );
-                        })}
-                      </div>
-
-                      {group.shifts.some((s: ProductionEntry) => s.notes) && (
-                        <div className="bg-slate-50/80 p-4 rounded-2xl flex gap-3 border border-slate-100">
-                          <FileText size={16} className="text-slate-400 mt-0.5" />
-                          <div className="space-y-1">
-                             {group.shifts.map((s: ProductionEntry, nIdx: number) => s.notes && (
-                               <p key={nIdx} className="text-xs italic text-slate-500 leading-relaxed font-medium">
-                                 {group.shifts.length > 1 && <span className="text-[9px] font-black text-slate-400 uppercase mr-2">{s.shift === 'Shift 1' ? 'S1' : s.shift === 'Shift 2' ? 'S2' : s.shift}:</span>}
-                                 {s.notes}
-                               </p>
-                             ))}
                           </div>
-                        </div>
-                      )}
+                        ))}
+                      </div>
                     </div>
 
                     <div className="lg:w-64 border-t lg:border-t-0 lg:border-l border-slate-100 pt-6 lg:pt-0 lg:pl-8 flex flex-col gap-5">
@@ -544,15 +522,6 @@ const Dashboard: React.FC<DashboardProps> = ({ entries, plant }) => {
               </div>
             );
           })}
-          
-          {timelineNodes.length === 0 && (
-            <div className="py-20 text-center space-y-4">
-               <div className="p-6 bg-slate-50 rounded-full w-20 h-20 flex items-center justify-center mx-auto border-2 border-dashed border-slate-200">
-                  <Timer className="text-slate-300" size={32} />
-               </div>
-               <p className="text-sm font-bold text-slate-400 uppercase tracking-widest">Awaiting Shop Floor Progression Data</p>
-            </div>
-          )}
         </div>
       </div>
 
@@ -563,8 +532,8 @@ const Dashboard: React.FC<DashboardProps> = ({ entries, plant }) => {
               <TrendingUp size={20} />
             </div>
             <div>
-              <h3 className="text-lg font-bold text-slate-900">Activity Performance Benchmark</h3>
-              <p className="text-sm text-slate-500">Standard vs. Actual cycle time (mins)</p>
+              <h3 className="text-lg font-bold text-slate-900">Performance Benchmark</h3>
+              <p className="text-sm text-slate-500">Analysis for {selectedPlantFilter === 'All' ? 'Consolidated Enterprise' : selectedPlantFilter}</p>
             </div>
           </div>
           <div className="h-[300px]">
@@ -589,7 +558,7 @@ const Dashboard: React.FC<DashboardProps> = ({ entries, plant }) => {
             </div>
             <div>
               <h3 className="text-lg font-bold text-slate-900">Bottleneck Analysis</h3>
-              <p className="text-sm text-slate-500">Aggregated loss hours by production activity</p>
+              <p className="text-sm text-slate-500">Loss hours aggregation across processes</p>
             </div>
           </div>
           <div className="h-[250px]">
@@ -613,31 +582,14 @@ const MetricBox: React.FC<{ label: string; value: string; theme?: 'default' | 'p
   const getThemeClasses = () => {
     switch(theme) {
       case 'purple':
-        return {
-          label: 'text-purple-400',
-          value: 'text-purple-900',
-          bg: 'bg-purple-50/50',
-          border: 'border-purple-100'
-        };
+        return { label: 'text-purple-400', value: 'text-purple-900', bg: 'bg-purple-50/50', border: 'border-purple-100' };
       case 'indigo':
-        return {
-          label: 'text-indigo-400',
-          value: 'text-indigo-900',
-          bg: 'bg-indigo-50/50',
-          border: 'border-indigo-100'
-        };
+        return { label: 'text-indigo-400', value: 'text-indigo-900', bg: 'bg-indigo-50/50', border: 'border-indigo-100' };
       default:
-        return {
-          label: 'text-slate-400',
-          value: 'text-slate-900',
-          bg: 'bg-slate-50/50',
-          border: 'border-slate-100'
-        };
+        return { label: 'text-slate-400', value: 'text-slate-900', bg: 'bg-slate-50/50', border: 'border-slate-100' };
     }
   };
-
   const colors = getThemeClasses();
-
   return (
     <div className={`${colors.bg} p-4 rounded-2xl border ${colors.border} flex flex-col items-center justify-center text-center`}>
       <span className={`text-[10px] font-bold ${colors.label} mb-1 uppercase tracking-widest`}>{label}</span>
@@ -647,7 +599,7 @@ const MetricBox: React.FC<{ label: string; value: string; theme?: 'default' | 'p
 };
 
 const KPICard: React.FC<{ icon: React.ReactNode; label: string; value: string; subtext: string; unit?: string }> = ({ icon, label, value, subtext, unit }) => (
-  <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm flex items-start gap-4">
+  <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm flex items-start gap-4 transition-all hover:border-blue-200">
     <div className="p-3 bg-slate-50 rounded-2xl">{icon}</div>
     <div>
       <p className="text-sm font-semibold text-slate-500">{label}</p>

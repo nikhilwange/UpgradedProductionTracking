@@ -19,7 +19,7 @@ const ROLE_IDENTITY_MAP = {
     iconColor: "text-green-500",
   },
   management: {
-    label: "MANAGEMENT VIEW",
+    label: "MANAGEMENT VIEW (GLOBAL)",
     icon: Briefcase,
     textColor: "text-blue-500",
     iconColor: "text-blue-500",
@@ -194,7 +194,6 @@ const App: React.FC = () => {
   };
 
   const fetchCloudData = async () => {
-    // Data isolation: Do not fetch until userRole and homePlant are defined
     if (!session || !userRole) return;
     
     setIsSyncing(true);
@@ -204,9 +203,9 @@ const App: React.FC = () => {
         .select('*')
         .order('created_at', { ascending: false });
 
-      // Apply Plant-Based Isolation: 
-      // Only Admins can see cross-plant data. Management/Operators are restricted to their home plant.
-      if (userRole !== 'admin') {
+      // DATA ISOLATION LOGIC:
+      // Admins AND Management users can see cross-plant data (Global Viewers).
+      if (userRole !== 'admin' && userRole !== 'management') {
         query = query.eq('plant', homePlant);
       }
 
@@ -257,7 +256,6 @@ const App: React.FC = () => {
   };
 
   useEffect(() => {
-    // Re-fetch whenever session, role or plant changes to maintain data isolation
     if (session && userRole) {
       fetchCloudData();
       const channel = supabase.channel('realtime_production')
@@ -335,7 +333,7 @@ const App: React.FC = () => {
         model: updatedEntry.model,
         serial_no: updatedEntry.serialNo,
         unit_sr_no: updatedEntry.unitSrNo || '',
-        so_sq_no: updatedEntry.soSqNo || '',
+        so_sq_no: updatedEntry.soSqNo,
         production_date: updatedEntry.productionDate,
         end_date: updatedEntry.endDate,
         shift: updatedEntry.shift,
@@ -414,6 +412,7 @@ const App: React.FC = () => {
   if (!session) return <Auth />;
 
   const isAdmin = userRole === 'admin';
+  const isGlobalViewer = userRole === 'admin' || userRole === 'management';
   const currentRoleIdentity = userRole ? ROLE_IDENTITY_MAP[userRole] : ROLE_IDENTITY_MAP.operator;
 
   return (
@@ -476,7 +475,9 @@ const App: React.FC = () => {
                   {activeTab === 'admin-manager' && 'Administration Console'}
                 </h2>
                 <p className="text-[11px] text-slate-500 font-bold tracking-tight">
-                  Monitoring Plant: {homePlant} • Powered by Supabase
+                  Monitoring Plant: <span className="bg-blue-50 text-blue-700 px-2 py-0.5 rounded border border-blue-100 uppercase">
+                    {isGlobalViewer ? 'AMBERNATH AND CHAKAN' : homePlant}
+                  </span> • Powered by Supabase
                 </p>
               </div>
             </div>
@@ -490,7 +491,7 @@ const App: React.FC = () => {
         </header>
 
         <div className="p-4 md:p-8 max-w-7xl mx-auto w-full">
-          {activeTab === 'dashboard' && <Dashboard entries={entries} plant={homePlant} />}
+          {activeTab === 'dashboard' && <Dashboard entries={entries} plant={homePlant} userRole={userRole} />}
           {activeTab === 'entry' && <OperatorEntry onAddEntry={handleAddEntry} entries={entries} plant={homePlant} />}
           {activeTab === 'manpower' && <ManpowerSummary entries={entries} />}
           {activeTab === 'data' && <DataTable entries={entries} onDelete={handleDeleteEntry} isAdmin={isAdmin} />}
