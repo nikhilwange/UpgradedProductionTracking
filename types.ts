@@ -13,6 +13,7 @@ export interface ShiftAssignment {
 
 export interface ProductionEntry {
   id: string;
+  plant: string; // New field for multi-plant tracking
   stage: string;      
   productLine: string;
   model: string;     

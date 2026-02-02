@@ -105,6 +105,7 @@ const DataTable: React.FC<DataTableProps> = ({ entries, onDelete, isAdmin }) => 
     if (searchQuery) {
       const q = searchQuery.toLowerCase();
       result = result.filter(r => 
+        (r.plant || '').toLowerCase().includes(q) ||
         (r.stage || '').toLowerCase().includes(q) ||
         (r.productLine || '').toLowerCase().includes(q) ||
         (r.model || '').toLowerCase().includes(q) || 
@@ -157,10 +158,11 @@ const DataTable: React.FC<DataTableProps> = ({ entries, onDelete, isAdmin }) => 
   }, [entries, searchQuery, startDate, endDate]);
 
   const handleExport = () => {
-    let headers: string[] = ['Entry Date', 'Prod Date', 'Shift', 'Stage', 'Product Line', 'Model', 'Unit Sr No', 'Serial Number', 'Activity', 'Shift Start Time', 'Shift End Time', 'Status', 'Inter-Activity Loss (H)', 'Activity Loss (H)', 'Actual Mins', 'Parameter', 'Defect', 'Description'];
+    let headers: string[] = ['Plant', 'Entry Date', 'Prod Date', 'Shift', 'Stage', 'Product Line', 'Model', 'Unit Sr No', 'Serial Number', 'Activity', 'Shift Start Time', 'Shift End Time', 'Status', 'Inter-Activity Loss (H)', 'Activity Loss (H)', 'Actual Mins', 'Parameter', 'Defect', 'Description'];
     let csvRows: string[] = [];
     if (viewMode === 'records') {
       csvRows = filteredFlattenedRecords.map(r => [
+        r.plant || 'CHAKAN',
         formatDate(getEntryDateOnly(r.createdAt)),
         formatDate(r.displayDate),
         r.displayShift,
@@ -221,9 +223,10 @@ const DataTable: React.FC<DataTableProps> = ({ entries, onDelete, isAdmin }) => 
       <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden flex flex-col">
         <div className="overflow-x-auto overflow-y-auto max-h-[calc(100vh-400px)] min-h-[450px] custom-scrollbar">
           {viewMode === 'records' ? (
-            <table className="w-full text-sm table-fixed min-w-[1850px]">
+            <table className="w-full text-sm table-fixed min-w-[1950px]">
               <thead className="bg-slate-50 border-b border-slate-200 sticky top-0 z-20">
                 <tr>
+                  <th className="w-24 px-2 py-4 text-center text-[10px] font-bold text-slate-500 uppercase tracking-wider bg-slate-50">Plant</th>
                   <th className="w-24 px-2 py-4 text-center text-[10px] font-bold text-slate-500 uppercase tracking-wider bg-slate-50">Entry Date</th>
                   <th className="w-24 px-2 py-4 text-center text-[10px] font-bold text-slate-500 uppercase tracking-wider bg-slate-50">Prod Date</th>
                   <th className="w-20 px-2 py-4 text-center text-[10px] font-bold text-slate-500 uppercase tracking-wider bg-slate-50">Shift</th>
@@ -245,6 +248,7 @@ const DataTable: React.FC<DataTableProps> = ({ entries, onDelete, isAdmin }) => 
               <tbody className="divide-y divide-slate-100">
                 {filteredFlattenedRecords.map(row => (
                   <tr key={row.rowId} className="hover:bg-slate-50/80 transition-colors group align-middle text-sm">
+                    <td className="px-2 py-3 text-center"><span className="px-2 py-0.5 rounded text-[9px] font-black tracking-widest bg-slate-100 text-slate-500 border border-slate-200">{row.plant || 'CHAKAN'}</span></td>
                     <td className="px-2 py-3 text-center font-mono text-[10px] text-slate-400 whitespace-nowrap">{formatDate(getEntryDateOnly(row.createdAt))}</td>
                     <td className="px-2 py-3 text-center font-mono text-[10px] text-slate-500 whitespace-nowrap">{formatDate(row.displayDate)}</td>
                     <td className="px-2 py-3 text-center"><span className={`px-2 py-0.5 rounded text-[9px] font-black tracking-widest ${row.displayShift === 'Shift 2' ? 'bg-amber-50 text-amber-600 border border-amber-100' : 'bg-blue-50 text-blue-600 border-blue-100'}`}>{row.displayShift || 'S1'}</span></td>

@@ -1,10 +1,10 @@
-
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { 
   Send, Users, CalendarDays, Tag, Hash, Box, Layout, Layers, Info, Clock3, 
-  ChevronDown, RefreshCw, Loader2, ArrowRight, ListChecks, X, AlertCircle, FileText, Scan, CheckCircle2
+  ChevronDown, RefreshCw, Loader2, ArrowRight, ListChecks, X, AlertCircle, FileText, Scan, CheckCircle2, Activity,
+  Filter
 } from 'lucide-react';
-import { STAGE_MAPPING, ACTIVITY_STANDARDS, MODELS_LIST, PRODUCT_LINES_LIST, SERIAL_NUMBERS_LIST, BREAK_TIMES, OPERATORS_BY_MODEL_LINE, LOSS_PARAMETER_MAPPING, HOLIDAYS_LIST } from '../constants';
+import { PLANT_REGISTRY, getModelContext, MODELS_LIST, PRODUCT_LINES_LIST, SERIAL_NUMBERS_LIST, BREAK_TIMES, OPERATORS_BY_MODEL_LINE, LOSS_PARAMETER_MAPPING, HOLIDAYS_LIST } from '../constants';
 import { ProductionEntry } from '../types';
 import { supabase } from '../supabase';
 import { Html5QrcodeScanner } from 'html5-qrcode';
@@ -15,11 +15,6 @@ const S1_END = 930;    // 15:30
 const S2_START = 900;  // 15:00
 const S2_END = 1410;   // 23:30
 
-interface OperatorEntryProps {
-  onAddEntry: (entries: ProductionEntry | ProductionEntry[]) => void;
-  entries: ProductionEntry[];
-}
-
 interface AssignmentInput {
   operators: string[];
   count: number;
@@ -28,27 +23,11 @@ interface AssignmentInput {
   issueDescription: string;
 }
 
-const NH_STAGE_MAPPING: Record<string, string[]> = {
-  "Loading": ["Frame Movement", "Evaporator Installation", "Compressor Installation", "Pump Assembly", "Hydraulic Piping-1", "PHE Mounting", "Evaporator Inlet Pipe", "Discharge Pipe Installation", "Suction Line Installation", "Compressor Housing Mounting", "Glycol Pump Mounting", "Hydraulic Piping-2", "V Coil Mounting"],
-  "Brazing": ["Discharge line", "Liquid Line", "Glycol Expansion tanks mounting", "Fan Assembly", "Fan Wiring"],
-  "Wiring": ["Insulation", "Valves Fitting", "Wiring", "Vacuuming", "Refrigerant"],
-  "Dry Run Test": ["Dry Run Test"],
-  "Lab": ["EOL"],
-  "Finishing": ["Finishing"]
-};
-
-const CH_STAGE_MAPPING: Record<string, string[]> = {
-  "Loading": ["Frame Movement", "Evaporator Installation", "Compressor Installation", "Pump Assembly", "Evaporator Inlet Pipe", "Discharge Pipe Installation", "Suction Line Installation", "Compressor Housing Mounting", "V Coil Mounting", "Hydraulic Pipe Line Installation"],
-  "Brazing": ["Discharge Line", "Liquid Line", "Fan Assembly", "Fan Wiring"],
-  "Wiring": ["Insulation", "Valves Fitting", "Wiring", "Vacuuming", "Refrigerant"],
-  "Dry Run Test": ["Dry Run Test"],
-  "Lab": ["Eol"],
-  "Finishing": ["Finishing"]
-};
-
-const NH_ACTIVITY_STANDARDS: Record<string, number> = {
-  "Frame Movement": 120, "Evaporator Installation": 66, "Compressor Installation": 144, "Pump Assembly": 40, "Hydraulic Piping-1": 450, "PHE Mounting": 300, "Evaporator Inlet Pipe": 65, "Discharge Pipe Installation": 36, "Suction Line Installation": 70, "Compressor Housing Mounting": 100, "Glycol Pump Mounting": 40, "Hydraulic Piping-2": 450, "V Coil Mounting": 220, "Discharge line": 265, "Liquid Line": 248, "Glycol Expansion tanks mounting": 180, "Fan Assembly": 320, "Fan Wiring": 240, "Insulation": 540, "Valves Fitting": 253, "Wiring": 518, "Vacuuming": 315, "Refrigerant": 202, "Dry Run Test": 1200, "EOL": 900, "Finishing": 423
-};
+interface OperatorEntryProps {
+  onAddEntry: (entries: ProductionEntry | ProductionEntry[]) => void;
+  entries: ProductionEntry[];
+  plant: string;
+}
 
 const fromMins = (mins: number) => {
   const h = Math.floor(mins / 60) % 24;
@@ -124,23 +103,59 @@ const FormDateTimeInput: React.FC<{
   );
 };
 
-const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries }) => {
+const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plant }) => {
   const [serialNo, setSerialNo] = useState('');
   const [unitSrNo, setUnitSrNo] = useState('');
+  
+  const filteredModels = useMemo(() => {
+    if (plant === 'AMBERNATH') {
+      return MODELS_LIST.filter(m => m === 'LI7');
+    }
+    return MODELS_LIST.filter(m => m !== 'LI7');
+  }, [plant]);
+
+  const filteredProductLines = useMemo(() => {
+    if (plant === 'AMBERNATH') {
+      return PRODUCT_LINES_LIST.filter(pl => pl === 'LI7');
+    }
+    return PRODUCT_LINES_LIST.filter(pl => pl !== 'LI7');
+  }, [plant]);
+
+  const [model, setModel] = useState('');
+  const [productLine, setProductLine] = useState('');
+
+  useEffect(() => {
+    if (filteredModels.length > 0 && !filteredModels.includes(model)) {
+      setModel(filteredModels[0]);
+    }
+  }, [filteredModels, model]);
+
+  useEffect(() => {
+    if (filteredProductLines.length > 0 && !filteredProductLines.includes(productLine)) {
+      setProductLine(filteredProductLines[0]);
+    }
+  }, [filteredProductLines, productLine]);
+
   const [activeInProgressEntry, setActiveInProgressEntry] = useState<ProductionEntry | null>(null);
   const [isScanning, setIsScanning] = useState<'scan' | null>(null);
   const scannerRef = useRef<Html5QrcodeScanner | null>(null);
 
-  const isNH = useMemo(() => serialNo.trim().toUpperCase().startsWith('NH'), [serialNo]);
-  const isCH = useMemo(() => serialNo.trim().toUpperCase().startsWith('CH'), [serialNo]);
-  
-  const activeStageMapping = useMemo(() => isNH ? NH_STAGE_MAPPING : isCH ? CH_STAGE_MAPPING : STAGE_MAPPING, [isNH, isCH]);
-  const activeActivityStandards = useMemo(() => isNH ? NH_ACTIVITY_STANDARDS : ACTIVITY_STANDARDS, [isNH]);
+  const context = useMemo(() => getModelContext(serialNo, model, plant), [serialNo, model, plant]);
+  const activeStageMapping = context.mapping;
+  const activeActivityStandards = context.standards;
   const activeStagesList = useMemo(() => Object.keys(activeStageMapping), [activeStageMapping]);
 
   const [stage, setStage] = useState(activeStagesList[0]);
   const [activity, setActivity] = useState(activeStageMapping[activeStagesList[0]][0]);
   
+  useEffect(() => {
+    if (!activeInProgressEntry && activeStagesList.length > 0) {
+      const firstStage = activeStagesList[0];
+      setStage(firstStage);
+      setActivity(activeStageMapping[firstStage][0]);
+    }
+  }, [activeStagesList, activeStageMapping, activeInProgressEntry]);
+
   const isAlreadyLogged = useMemo(() => {
     const cleanSerial = serialNo.trim().toLowerCase();
     const cleanActivity = activity.trim().toLowerCase();
@@ -154,8 +169,6 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries }) =>
     );
   }, [entries, serialNo, activity, activeInProgressEntry]);
 
-  const [productLine, setProductLine] = useState(PRODUCT_LINES_LIST[0]);
-  const [model, setModel] = useState(MODELS_LIST[0]);
   const [soSqNo, setSoSqNo] = useState('');
   const [productionDate, setProductionDate] = useState(new Date().toISOString().split('T')[0]);
   const [endDate, setEndDate] = useState(new Date().toISOString().split('T')[0]);
@@ -291,6 +304,7 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries }) =>
         if (inProgress && !ipError) {
           setActiveInProgressEntry({
             id: String(inProgress.id),
+            plant: inProgress.plant || 'CHAKAN',
             stage: inProgress.station,
             productLine: inProgress.product_line,
             model: inProgress.model,
@@ -442,30 +456,34 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries }) =>
 
   const handleScanResult = (text: string) => {
     const parts = text.split('|').map(p => p.trim());
-    
-    // Auto-capture Date and Time of Scanning Event
     const now = new Date();
     const dateStr = now.toISOString().split('T')[0];
     const timeStr = now.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
 
+    const findMatchingValue = (list: string[], scannedValue: string) => {
+      if (!scannedValue) return null;
+      return list.find(item => item.trim().toUpperCase() === scannedValue.toUpperCase());
+    };
+
     if (parts.length >= 5) {
-      // ORDER: UNIT_SR_NO | SERIAL_NO | MODEL | PRODUCT_LINE | SO_SQ_NO
       setUnitSrNo(parts[0]);
       setSerialNo(parts[1]);
-      if (MODELS_LIST.includes(parts[2])) setModel(parts[2]);
-      if (PRODUCT_LINES_LIST.includes(parts[3])) setProductLine(parts[3]);
+      const matchedModel = findMatchingValue(MODELS_LIST, parts[2]);
+      if (matchedModel) setModel(matchedModel);
+      const matchedLine = findMatchingValue(PRODUCT_LINES_LIST, parts[3]);
+      if (matchedLine) setProductLine(matchedLine);
       setSoSqNo(parts[4]);
     } else if (parts.length === 4) {
-      // LEGACY ORDER: SERIAL_NO | MODEL | PRODUCT_LINE | SO_SQ_NO
       setSerialNo(parts[0]);
-      if (MODELS_LIST.includes(parts[1])) setModel(parts[1]);
-      if (PRODUCT_LINES_LIST.includes(parts[2])) setProductLine(parts[2]);
+      const matchedModel = findMatchingValue(MODELS_LIST, parts[1]);
+      if (matchedModel) setModel(matchedModel);
+      const matchedLine = findMatchingValue(PRODUCT_LINES_LIST, parts[2]);
+      if (matchedLine) setProductLine(matchedLine);
       setSoSqNo(parts[3]);
     } else {
       setSerialNo(parts[0]);
     }
 
-    // Capture the time of event automatically
     setProductionDate(dateStr);
     setStartTime(timeStr);
     setEndTime(timeStr);
@@ -500,6 +518,7 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries }) =>
           const idleHrs = Number((idleGapMinutes / 60).toFixed(4));
           entriesToSave.push({
             id: getUUID(),
+            plant: context.plant,
             stage: "Idle / Transition",
             productLine, model, serialNo, unitSrNo, soSqNo,
             productionDate: lastLog.endDate, endDate: productionDate,
@@ -518,9 +537,9 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries }) =>
           });
         }
 
-        // CREATE NEW "IN PROGRESS" RECORD
         entriesToSave.push({
           id: getUUID(),
+          plant: context.plant,
           stage, productLine, model, serialNo, unitSrNo, soSqNo,
           productionDate, endDate: productionDate,
           shift: multiDaySplits[0]?.shift || 'Shift 1',
@@ -534,7 +553,6 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries }) =>
           createdAt: new Date().toISOString()
         });
       } else {
-        // FINISH EXISTING RECORD
         multiDaySplits.forEach((split, idx) => {
           const key = `${split.date}-${split.shift}`;
           const input = assignmentInputs[key];
@@ -542,6 +560,7 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries }) =>
           
           entriesToSave.push({
             id: idx === 0 ? activeInProgressEntry.id : getUUID(),
+            plant: activeInProgressEntry.plant,
             stage, productLine, model, serialNo, unitSrNo, soSqNo,
             productionDate: split.date, endDate: endDate,
             shift: split.shift, activity,
@@ -610,18 +629,77 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries }) =>
           <div className="flex justify-center pb-4"><button type="button" onClick={startScanner} className="flex items-center gap-3 px-8 py-4 bg-blue-600 text-white rounded-2xl font-black text-sm uppercase tracking-widest hover:bg-blue-700 shadow-xl shadow-blue-500/20 active:scale-95 transition-all"><Scan size={20} /> Barcode Scan Unit</button></div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-7 gap-4">
-             <div className="space-y-2"><label className="text-sm font-bold">Commencement Date</label><FormDateTimeInput type="date" value={productionDate} onChange={setProductionDate} disabled={!!activeInProgressEntry} /></div>
-             <div className="space-y-2"><label className="text-sm font-bold">Shift Indicator</label><div className="px-4 py-2 bg-slate-50 border border-slate-100 rounded-[1.5rem] text-sm font-black text-blue-600 shadow-inner flex items-center justify-center">{activeInProgressEntry ? activeInProgressEntry.shift : (multiDaySplits[0]?.shift || 'Shift 1')}</div></div>
-             <div className="space-y-2"><label className="text-sm font-bold">Unit Model</label><select value={model} onChange={(e) => setModel(e.target.value)} disabled={!!activeInProgressEntry} className="w-full px-4 py-2 bg-white border border-slate-200 rounded-[1.5rem] text-sm font-bold shadow-sm text-[#002060]">{MODELS_LIST.map(m => <option key={m} value={m}>{m}</option>)}</select></div>
-             <div className="space-y-2"><label className="text-sm font-bold">Product Line</label><select value={productLine} onChange={(e) => setProductLine(e.target.value)} disabled={!!activeInProgressEntry} className="w-full px-4 py-2 bg-white border border-slate-200 rounded-[1.5rem] text-sm font-bold shadow-sm text-[#002060]">{PRODUCT_LINES_LIST.map(pl => <option key={pl} value={pl}>{pl}</option>)}</select></div>
-             <div className="space-y-2"><label className="text-sm font-bold">Unit Sr. No.</label><input type="text" value={unitSrNo} onChange={(e) => setUnitSrNo(e.target.value)} placeholder="Unit SN..." className="w-full px-4 py-2 bg-white border border-slate-200 rounded-[1.5rem] text-sm font-bold shadow-sm text-[#002060]" /></div>
-             <div className="space-y-2"><label className="text-sm font-bold">Serial Number</label><div className="relative"><input type="text" list="serial-no-list" value={serialNo} onChange={(e) => setSerialNo(e.target.value)} placeholder="SN..." className="w-full pl-4 py-2 bg-white border border-slate-200 rounded-[1.5rem] text-sm font-bold shadow-sm text-[#002060]" required />{isFetchingLastLog && <Loader2 size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-blue-500 animate-spin" />}<datalist id="serial-no-list">{SERIAL_NUMBERS_LIST.map(sn => <option key={sn} value={sn} />)}</datalist></div></div>
-             <div className="space-y-2"><label className="text-sm font-bold">SO / SQ Number</label><input type="text" value={soSqNo} onChange={(e) => setSoSqNo(e.target.value)} placeholder="SO-0000" className="w-full px-4 py-2 bg-white border border-slate-200 rounded-[1.5rem] text-sm font-bold shadow-sm text-[#002060]" /></div>
+             <div className="space-y-2">
+               <label className="text-xs font-bold text-slate-500 uppercase flex items-center gap-2 ml-1">
+                 <CalendarDays size={14} className="text-blue-500" /> Commencement Date
+               </label>
+               <FormDateTimeInput type="date" value={productionDate} onChange={setProductionDate} disabled={!!activeInProgressEntry} />
+             </div>
+             <div className="space-y-2">
+               <label className="text-xs font-bold text-slate-500 uppercase flex items-center gap-2 ml-1">
+                 <Clock3 size={14} className="text-blue-500" /> Shift Indicator
+               </label>
+               <div className="px-4 py-2 bg-slate-50 border border-slate-100 rounded-[1.5rem] text-sm font-black text-blue-600 shadow-inner flex items-center justify-center">
+                 {activeInProgressEntry ? activeInProgressEntry.shift : (multiDaySplits[0]?.shift || 'Shift 1')}
+               </div>
+             </div>
+             <div className="space-y-2">
+               <label className="text-xs font-bold text-slate-500 uppercase flex items-center gap-2 ml-1">
+                 <Box size={14} className="text-blue-500" /> Unit Model
+               </label>
+               <select value={model} onChange={(e) => setModel(e.target.value)} disabled={!!activeInProgressEntry} className="w-full px-4 py-2 bg-white border border-slate-200 rounded-[1.5rem] text-sm font-bold shadow-sm text-[#002060]">
+                 {filteredModels.map(m => <option key={m} value={m}>{m}</option>)}
+               </select>
+             </div>
+             <div className="space-y-2">
+               <label className="text-xs font-bold text-slate-500 uppercase flex items-center gap-2 ml-1">
+                 <Layers size={14} className="text-blue-500" /> Product Line
+               </label>
+               <select value={productLine} onChange={(e) => setProductLine(e.target.value)} disabled={!!activeInProgressEntry} className="w-full px-4 py-2 bg-white border border-slate-200 rounded-[1.5rem] text-sm font-bold shadow-sm text-[#002060]">
+                 {filteredProductLines.map(pl => <option key={pl} value={pl}>{pl}</option>)}
+               </select>
+             </div>
+             <div className="space-y-2">
+               <label className="text-xs font-bold text-slate-500 uppercase flex items-center gap-2 ml-1">
+                 <Hash size={14} className="text-blue-500" /> Unit Sr. No.
+               </label>
+               <input type="text" value={unitSrNo} onChange={(e) => setUnitSrNo(e.target.value)} placeholder="Unit SN..." className="w-full px-4 py-2 bg-white border border-slate-200 rounded-[1.5rem] text-sm font-bold shadow-sm text-[#002060]" />
+             </div>
+             <div className="space-y-2">
+               <label className="text-xs font-bold text-slate-500 uppercase flex items-center gap-2 ml-1">
+                 <Tag size={14} className="text-blue-500" /> Serial Number
+               </label>
+               <div className="relative">
+                 <input type="text" list="serial-no-list" value={serialNo} onChange={(e) => setSerialNo(e.target.value)} placeholder="SN..." className="w-full pl-4 py-2 bg-white border border-slate-200 rounded-[1.5rem] text-sm font-bold shadow-sm text-[#002060]" required />
+                 {isFetchingLastLog && <Loader2 size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-blue-500 animate-spin" />}
+                 <datalist id="serial-no-list">{SERIAL_NUMBERS_LIST.map(sn => <option key={sn} value={sn} />)}</datalist>
+               </div>
+             </div>
+             <div className="space-y-2">
+               <label className="text-xs font-bold text-slate-500 uppercase flex items-center gap-2 ml-1">
+                 <FileText size={14} className="text-blue-500" /> SO / SQ Number
+               </label>
+               <input type="text" value={soSqNo} onChange={(e) => setSoSqNo(e.target.value)} placeholder="SO-0000" className="w-full px-4 py-2 bg-white border border-slate-200 rounded-[1.5rem] text-sm font-bold shadow-sm text-[#002060]" />
+             </div>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6 bg-slate-50/50 p-6 rounded-2xl border border-slate-100">
-             <div className="space-y-3"><label className="text-sm font-bold">Select Stage</label><select value={stage} onChange={(e) => { const nextStage = e.target.value; setStage(nextStage); setActivity(activeStageMapping[nextStage][0]); }} disabled={!!activeInProgressEntry} className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl text-sm font-bold text-[#002060]">{activeStagesList.map(s => <option key={s} value={s}>{s}</option>)}</select></div>
-             <div className="space-y-3"><label className="text-sm font-bold">Production Activity</label><select value={activity} onChange={(e) => setActivity(e.target.value)} disabled={!!activeInProgressEntry} className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl text-sm font-bold text-[#002060]">{(activeStageMapping[stage] || []).map(a => <option key={a} value={a}>{a}</option>)}</select></div>
+             <div className="space-y-3">
+               <label className="text-xs font-bold text-slate-500 uppercase flex items-center gap-2 ml-1">
+                 <Layout size={14} className="text-blue-500" /> Select Stage
+               </label>
+               <select value={stage} onChange={(e) => { const nextStage = e.target.value; setStage(nextStage); setActivity(activeStageMapping[nextStage][0]); }} disabled={!!activeInProgressEntry} className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl text-sm font-bold text-[#002060]">
+                 {activeStagesList.map(s => <option key={s} value={s}>{s}</option>)}
+               </select>
+             </div>
+             <div className="space-y-3">
+               <label className="text-xs font-bold text-slate-500 uppercase flex items-center gap-2 ml-1">
+                 <Activity size={14} className="text-blue-500" /> Production Activity
+               </label>
+               <select value={activity} onChange={(e) => setActivity(e.target.value)} disabled={!!activeInProgressEntry} className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl text-sm font-bold text-[#002060]">
+                 {(activeStageMapping[stage] || []).map(a => <option key={a} value={a}>{a}</option>)}
+               </select>
+             </div>
           </div>
 
           <div className="bg-blue-50 border border-blue-100 rounded-2xl p-6 flex items-start gap-4 animate-in fade-in duration-300">
@@ -651,13 +729,32 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries }) =>
           )}
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-            <div className="space-y-4"><label className="text-sm font-bold">Commencement</label><div className="grid grid-cols-2 gap-3"><FormDateTimeInput type="date" value={productionDate} onChange={setProductionDate} paddingY="py-3" disabled={!!activeInProgressEntry} /><FormDateTimeInput type="time" value={startTime} onChange={setStartTime} paddingY="py-3" disabled={!!activeInProgressEntry} /></div></div>
-            <div className="space-y-4"><label className="text-sm font-bold">Completion</label><div className="grid grid-cols-2 gap-3"><FormDateTimeInput type="date" value={endDate} onChange={setEndDate} paddingY="py-3" disabled={!activeInProgressEntry} /><FormDateTimeInput type="time" value={endTime} onChange={setEndTime} paddingY="py-3" disabled={!activeInProgressEntry} /></div></div>
+            <div className="space-y-4">
+              <label className="text-xs font-bold text-slate-500 uppercase flex items-center gap-2 ml-1">
+                <ArrowRight size={14} className="text-blue-500" /> Commencement
+              </label>
+              <div className="grid grid-cols-2 gap-3">
+                <FormDateTimeInput type="date" value={productionDate} onChange={setProductionDate} paddingY="py-3" disabled={!!activeInProgressEntry} /><FormDateTimeInput type="time" value={startTime} onChange={setStartTime} paddingY="py-3" disabled={!!activeInProgressEntry} />
+              </div>
+            </div>
+            <div className="space-y-4">
+              <label className="text-xs font-bold text-slate-500 uppercase flex items-center gap-2 ml-1">
+                <CheckCircle2 size={14} className="text-emerald-500" /> Completion
+              </label>
+              <div className="grid grid-cols-2 gap-3">
+                <FormDateTimeInput type="date" value={endDate} onChange={setEndDate} paddingY="py-3" disabled={!activeInProgressEntry} /><FormDateTimeInput type="time" value={endTime} onChange={setEndTime} paddingY="py-3" disabled={!activeInProgressEntry} />
+              </div>
+            </div>
           </div>
 
           {activeInProgressEntry && (
             <div className="space-y-6 animate-in slide-in-from-top-4 duration-500">
-              <div className="flex items-center gap-4"><ListChecks size={22} className="text-blue-500" /><h4 className="text-lg font-bold text-slate-800 tracking-tight">Shift Resource Allocation</h4></div>
+              <div className="flex items-center gap-4">
+                <div className="p-2 bg-blue-100 rounded-xl text-blue-600 shadow-sm">
+                  <ListChecks size={22} />
+                </div>
+                <h4 className="text-lg font-bold text-slate-800 tracking-tight">Shift Resource Allocation</h4>
+              </div>
               <div className="grid grid-cols-1 gap-6">
                 {multiDaySplits.map((split) => {
                   const key = `${split.date}-${split.shift}`;
@@ -666,35 +763,125 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries }) =>
                   return (
                     <div key={key} className="bg-white border-2 border-emerald-100 rounded-[2.5rem] p-6 shadow-sm space-y-4">
                       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-100 pb-2">
-                        <div className="flex items-center gap-4"><CalendarDays size={20} className="text-emerald-500" /><div><p className="text-[11px] font-black text-slate-400 uppercase tracking-widest leading-none mb-1">{split.date}</p><h5 className="text-lg font-black text-slate-900 tracking-tight">{split.shift}</h5></div></div>
-                        <div className="flex flex-wrap gap-4 items-center"><div className="px-4 py-2 bg-slate-50 border border-slate-100 rounded-xl text-center"><p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Duration</p><p className="text-sm font-black text-slate-900">{split.minutes} Mins</p></div></div>
+                        <div className="flex items-center gap-4">
+                          <div className="p-2 bg-emerald-50 rounded-xl text-emerald-600">
+                            <CalendarDays size={20} />
+                          </div>
+                          <div>
+                            <p className="text-[11px] font-black text-slate-400 uppercase tracking-widest leading-none mb-1">{split.date}</p>
+                            <h5 className="text-lg font-black text-slate-900 tracking-tight">{split.shift}</h5>
+                          </div>
+                        </div>
+                        <div className="flex flex-wrap gap-4 items-center">
+                          <div className="px-4 py-2 bg-slate-50 border border-slate-100 rounded-xl text-center flex items-center gap-3">
+                            <Clock3 size={14} className="text-blue-500" />
+                            <div>
+                              <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Duration</p>
+                              <p className="text-sm font-black text-slate-900">{split.minutes} Mins</p>
+                            </div>
+                          </div>
+                        </div>
                       </div>
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div className="space-y-1"><label className="text-sm font-bold text-slate-700 ml-1">Personnel Deployment</label><OperatorMultiSelect options={availableOperators} selected={input.operators} onChange={(selected) => setAssignmentInputs(prev => ({ ...prev, [key]: { ...prev[key], operators: selected, count: selected.length } }))} /></div>
-                        <div className="space-y-1 flex flex-col justify-end"><div className="flex justify-between items-center px-1"><label className="text-sm font-bold text-slate-700">Total Headcount</label><span className={`text-xs font-black ${input.count === 0 ? 'text-rose-600 animate-pulse' : 'text-blue-600'}`}>{input.count} Manpower</span></div><div className="flex items-center gap-4 py-2"><input type="range" min="0" max="15" value={input.count} onChange={(e) => setAssignmentInputs(prev => ({ ...prev, [key]: { ...prev[key], count: Number(e.target.value) } }))} className="flex-1 accent-blue-600 h-1.5 bg-slate-100 rounded-lg appearance-none cursor-pointer" /></div></div>
+                        <div className="space-y-1">
+                          <label className="text-xs font-bold text-slate-500 uppercase flex items-center gap-2 ml-1">
+                            <Users size={14} className="text-blue-500" /> Personnel Deployment
+                          </label>
+                          <OperatorMultiSelect options={availableOperators} selected={input.operators} onChange={(selected) => setAssignmentInputs(prev => ({ ...prev, [key]: { ...prev[key], operators: selected, count: selected.length } }))} />
+                        </div>
+                        <div className="space-y-1 flex flex-col justify-end">
+                          <div className="flex justify-between items-center px-1">
+                            <label className="text-xs font-bold text-slate-500 uppercase flex items-center gap-2 ml-1">
+                              <Activity size={14} className="text-blue-500" /> Total Headcount
+                            </label>
+                            <span className={`text-xs font-black ${input.count === 0 ? 'text-rose-600 animate-pulse' : 'text-blue-600'}`}>{input.count} Manpower</span>
+                          </div>
+                          <div className="flex items-center gap-4 py-2">
+                            <input type="range" min="0" max="15" value={input.count} onChange={(e) => setAssignmentInputs(prev => ({ ...prev, [key]: { ...prev[key], count: Number(e.target.value) } }))} className="flex-1 accent-blue-600 h-1.5 bg-slate-100 rounded-lg appearance-none cursor-pointer" />
+                          </div>
+                        </div>
                       </div>
                       {allocatedLoss > 0 && (
-                        <div className="pt-2 py-2 border-t border-slate-100 space-y-2"><div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                          <div className="space-y-1"><label className="text-sm font-bold text-slate-700 ml-1">Affected Parameter</label><select value={input.affectedParameter} onChange={(e) => setAssignmentInputs(prev => ({ ...prev, [key]: { ...prev[key], affectedParameter: e.target.value } }))} className="w-full px-4 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold text-[#002060]"><option value="">Select Parameter</option>{Object.keys(LOSS_PARAMETER_MAPPING).map(p => <option key={p} value={p}>{p}</option>)}</select></div>
-                          <div className="space-y-1"><label className="text-sm font-bold text-slate-700 ml-1">Defect Category</label><select value={input.defectCategory} onChange={(e) => setAssignmentInputs(prev => ({ ...prev, [key]: { ...prev[key], defectCategory: e.target.value } }))} disabled={!input.affectedParameter} className="w-full px-4 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold text-[#002060]"><option value="">Select Category</option>{(LOSS_PARAMETER_MAPPING[input.affectedParameter] || []).map(d => <option key={d} value={d}>{d}</option>)}</select></div>
-                        </div><textarea value={input.issueDescription} onChange={(e) => setAssignmentInputs(prev => ({ ...prev, [key]: { ...prev[key], issueDescription: e.target.value } }))} placeholder="Describe the bottleneck..." className="w-full px-5 py-2 bg-white border border-slate-200 rounded-2xl text-xs font-bold min-h-[60px] text-[#002060]" rows={2} /></div>
+                        <div className="pt-2 py-2 border-t border-slate-100 space-y-2">
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                            <div className="space-y-1">
+                              <label className="text-xs font-bold text-slate-500 uppercase flex items-center gap-2 ml-1">
+                                <Filter size={14} className="text-rose-500" /> Affected Parameter
+                              </label>
+                              <select value={input.affectedParameter} onChange={(e) => setAssignmentInputs(prev => ({ ...prev, [key]: { ...prev[key], affectedParameter: e.target.value } }))} className="w-full px-4 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold text-[#002060]">
+                                <option value="">Select Parameter</option>
+                                {Object.keys(LOSS_PARAMETER_MAPPING).map(p => <option key={p} value={p}>{p}</option>)}
+                              </select>
+                            </div>
+                            <div className="space-y-1">
+                              <label className="text-xs font-bold text-slate-500 uppercase flex items-center gap-2 ml-1">
+                                <AlertCircle size={14} className="text-rose-500" /> Defect Category
+                              </label>
+                              <select value={input.defectCategory} onChange={(e) => setAssignmentInputs(prev => ({ ...prev, [key]: { ...prev[key], defectCategory: e.target.value } }))} disabled={!input.affectedParameter} className="w-full px-4 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold text-[#002060]">
+                                <option value="">Select Category</option>
+                                {(LOSS_PARAMETER_MAPPING[input.affectedParameter] || []).map(d => <option key={d} value={d}>{d}</option>)}
+                              </select>
+                            </div>
+                          </div>
+                          <div className="space-y-1">
+                            <label className="text-xs font-bold text-slate-500 uppercase flex items-center gap-2 ml-1">
+                              <FileText size={14} className="text-rose-500" /> Issue Description
+                            </label>
+                            <textarea value={input.issueDescription} onChange={(e) => setAssignmentInputs(prev => ({ ...prev, [key]: { ...prev[key], issueDescription: e.target.value } }))} placeholder="Describe the bottleneck..." className="w-full px-5 py-2 bg-white border border-slate-200 rounded-2xl text-xs font-bold min-h-[60px] text-[#002060]" rows={2} />
+                          </div>
+                        </div>
                       )}
                     </div>
                   );
                 })}
               </div>
-              <div className="max-w-md mx-auto space-y-2"><div className="flex items-center justify-between mb-1"><label className="text-sm font-bold text-slate-700">Production Loss (H)</label><button type="button" onClick={() => setIsAutoLoss(!isAutoLoss)} className="text-[10px] font-black text-blue-600 uppercase tracking-widest">Auto Calc</button></div><input type="number" step="0.01" value={lossHours} readOnly={isAutoLoss} onChange={(e) => setLossHours(Number(e.target.value))} className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-lg text-sm font-bold text-[#002060]" /></div>
+              <div className="max-w-md mx-auto space-y-2">
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-xs font-bold text-slate-500 uppercase flex items-center gap-2 ml-1">
+                    <Clock3 size={14} className="text-rose-500" /> Production Loss (H)
+                  </label>
+                  <button type="button" onClick={() => setIsAutoLoss(!isAutoLoss)} className="text-[10px] font-black text-blue-600 uppercase tracking-widest">Auto Calc</button>
+                </div>
+                <input type="number" step="0.01" value={lossHours} readOnly={isAutoLoss} onChange={(e) => setLossHours(Number(e.target.value))} className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-lg text-sm font-bold text-[#002060]" />
+              </div>
             </div>
           )}
 
           {idleGapMinutes > 0 && !activeInProgressEntry && (
             <div className="py-8 px-8 bg-indigo-50/30 border border-indigo-200 rounded-[2.5rem] space-y-6">
-              <div className="flex flex-wrap items-baseline gap-4 border-b border-indigo-100 pb-5"><h4 className="text-xl font-black text-indigo-900 tracking-tight leading-none">Inter-Activity Idle Time Audit</h4><div className="flex items-center gap-2 px-3 py-1 bg-[#4F46E5] text-white rounded-full text-[10px] font-black uppercase">LOSS: {(idleGapMinutes/60).toFixed(2)} HRS</div></div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div className="space-y-1.5"><label className="text-[11px] font-black text-indigo-900 uppercase tracking-widest ml-1">Affected Parameter</label><select value={idleAttribution.affectedParameter} onChange={(e) => setIdleAttribution(prev => ({ ...prev, affectedParameter: e.target.value }))} className="w-full px-4 py-3 bg-white border border-indigo-200 rounded-xl text-sm font-bold text-[#002060]" required><option value="">Select Affected Parameter</option>{Object.keys(LOSS_PARAMETER_MAPPING).map(p => <option key={p} value={p}>{p}</option>)}</select></div>
-                <div className="space-y-1.5"><label className="text-[11px] font-black text-indigo-900 uppercase tracking-widest ml-1">Defect Category</label><select value={idleAttribution.defectCategory} onChange={(e) => setIdleAttribution(prev => ({ ...prev, defectCategory: e.target.value }))} disabled={!idleAttribution.affectedParameter} className="w-full px-4 py-3 bg-white border border-indigo-200 rounded-xl text-sm font-bold text-[#002060]" required><option value="">Select Defect Category...</option>{(LOSS_PARAMETER_MAPPING[idleAttribution.affectedParameter] || []).map(d => <option key={d} value={d}>{d}</option>)}</select></div>
+              <div className="flex flex-wrap items-baseline gap-4 border-b border-indigo-100 pb-5">
+                <div className="p-2 bg-white rounded-xl text-indigo-600 shadow-sm">
+                  <Clock3 size={24} />
+                </div>
+                <h4 className="text-xl font-black text-indigo-900 tracking-tight leading-none">Inter-Activity Idle Time Audit</h4>
+                <div className="flex items-center gap-2 px-3 py-1 bg-[#4F46E5] text-white rounded-full text-[10px] font-black uppercase">LOSS: {(idleGapMinutes/60).toFixed(2)} HRS</div>
               </div>
-              <textarea value={idleAttribution.issueDescription} onChange={(e) => setIdleAttribution(prev => ({ ...prev, issueDescription: e.target.value }))} placeholder="Explain the idle phase bottleneck..." className="w-full px-5 py-4 bg-white border border-indigo-100 rounded-[1.5rem] text-sm font-bold min-h-[100px] text-[#002060]" required />
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="space-y-1.5">
+                  <label className="text-[11px] font-black text-indigo-900 uppercase tracking-widest ml-1 flex items-center gap-2">
+                    <Filter size={14} /> Affected Parameter
+                  </label>
+                  <select value={idleAttribution.affectedParameter} onChange={(e) => setIdleAttribution(prev => ({ ...prev, affectedParameter: e.target.value }))} className="w-full px-4 py-3 bg-white border border-indigo-200 rounded-xl text-sm font-bold text-[#002060]" required>
+                    <option value="">Select Affected Parameter</option>
+                    {Object.keys(LOSS_PARAMETER_MAPPING).map(p => <option key={p} value={p}>{p}</option>)}
+                  </select>
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-[11px] font-black text-indigo-900 uppercase tracking-widest ml-1 flex items-center gap-2">
+                    <AlertCircle size={14} /> Defect Category
+                  </label>
+                  <select value={idleAttribution.defectCategory} onChange={(e) => setIdleAttribution(prev => ({ ...prev, defectCategory: e.target.value }))} disabled={!idleAttribution.affectedParameter} className="w-full px-4 py-3 bg-white border border-indigo-200 rounded-xl text-sm font-bold text-[#002060]" required>
+                    <option value="">Select Defect Category...</option>
+                    {(LOSS_PARAMETER_MAPPING[idleAttribution.affectedParameter] || []).map(d => <option key={d} value={d}>{d}</option>)}
+                  </select>
+                </div>
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-[11px] font-black text-indigo-900 uppercase tracking-widest ml-1 flex items-center gap-2">
+                  <FileText size={14} /> Issue Description
+                </label>
+                <textarea value={idleAttribution.issueDescription} onChange={(e) => setIdleAttribution(prev => ({ ...prev, issueDescription: e.target.value }))} placeholder="Explain the idle phase bottleneck..." className="w-full px-5 py-4 bg-white border border-indigo-100 rounded-[1.5rem] text-sm font-bold min-h-[100px] text-[#002060]" required />
+              </div>
             </div>
           )}
 

@@ -5,13 +5,14 @@ import {
 } from 'recharts';
 import { TrendingUp, Clock, AlertTriangle, Package, ChevronDown, Activity as ActivityIcon, FileText, Timer, Filter } from 'lucide-react';
 import { ProductionEntry } from '../types';
-import { ACTIVITIES_LIST, ACTIVITY_STANDARDS } from '../constants';
+import { ACTIVITIES_LIST, ACTIVITY_STANDARDS, PLANT_REGISTRY } from '../constants';
 
 interface DashboardProps {
   entries: ProductionEntry[];
+  plant: string;
 }
 
-const Dashboard: React.FC<DashboardProps> = ({ entries }) => {
+const Dashboard: React.FC<DashboardProps> = ({ entries, plant }) => {
   const [selectedSerial, setSelectedSerial] = useState<string | null>(null);
   const [selectedModelFilter, setSelectedModelFilter] = useState<string>('All');
 
@@ -86,8 +87,29 @@ const Dashboard: React.FC<DashboardProps> = ({ entries }) => {
 
   const availableModels = useMemo(() => {
     const models = new Set(unitsList.map(u => u.model));
-    return ['All', ...Array.from(models).sort()];
-  }, [unitsList]);
+    const list = Array.from(models).sort();
+    if (plant === 'AMBERNATH') return list;
+    return ['All', ...list];
+  }, [unitsList, plant]);
+
+  // Handle default filter for Ambernath when "All" is not permitted
+  useEffect(() => {
+    if (plant === 'AMBERNATH' && selectedModelFilter === 'All') {
+      if (availableModels.length > 0) {
+        setSelectedModelFilter(availableModels[0]);
+      }
+    }
+  }, [plant, availableModels, selectedModelFilter]);
+
+  // Dynamic activity list for the pipeline based on model filter
+  const pipelineActivities = useMemo(() => {
+    if (selectedModelFilter === 'LI7') {
+      // Return Li7 flattened activity list (Normalizing to uppercase config for safety)
+      return Object.values(PLANT_REGISTRY.AMBERNATH.models.LI7.mapping).flat() as string[];
+    }
+    // Default to the Chakan NH activity list defined in constants
+    return ACTIVITIES_LIST;
+  }, [selectedModelFilter]);
 
   // Reset selected serial when filter changes if current selection is no longer valid
   useEffect(() => {
@@ -223,7 +245,11 @@ const Dashboard: React.FC<DashboardProps> = ({ entries }) => {
   const activePipelines = useMemo(() => {
     const lastSeen: Record<string, { activity: string; model: string }> = {};
     const filteredEntries = (entries || []).filter(e => !e.isGap && e.activity !== "Inter-Activity Idle Time");
-    const sorted = [...filteredEntries].sort((a: ProductionEntry, b: ProductionEntry) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+    const sorted = [...filteredEntries].sort((a: ProductionEntry, b: ProductionEntry) => {
+      const timeA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+      const timeB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+      return timeA - timeB;
+    });
     sorted.forEach((e: ProductionEntry) => {
       lastSeen[e.serialNo] = { activity: e.activity, model: e.model };
     });
@@ -241,7 +267,7 @@ const Dashboard: React.FC<DashboardProps> = ({ entries }) => {
   }
 
   const completedActivitiesCount = selectedUnitDetail ? new Set(selectedUnitDetail.allEntries.filter(e => e.status === 'Completed').map(e => e.activity)).size : 0;
-  const overallProgress = Math.round((completedActivitiesCount / ACTIVITIES_LIST.length) * 100);
+  const overallProgress = Math.round((completedActivitiesCount / pipelineActivities.length) * 100);
 
   return (
     <div className="space-y-8 pb-20">
@@ -278,25 +304,32 @@ const Dashboard: React.FC<DashboardProps> = ({ entries }) => {
 
         <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm overflow-hidden">
           <div className="flex items-center justify-between mb-6 px-2">
-            <div>
-              <h3 className="text-lg font-bold text-slate-900">Live Production Pipeline</h3>
-              <p className="text-sm text-slate-500">Real-time unit location across all activities</p>
+            <div className="flex items-center gap-4">
+              <div className="p-2.5 bg-slate-50 rounded-2xl text-blue-600 shadow-sm">
+                <ActivityIcon size={20} />
+              </div>
+              <div>
+                <h3 className="text-lg font-bold text-slate-900">Live Production Pipeline</h3>
+                <p className="text-sm text-slate-500">Real-time unit location across all activities</p>
+              </div>
             </div>
           </div>
           <div className="relative overflow-x-auto pb-4 custom-scrollbar">
             <div className="flex items-start min-w-[2500px] gap-0 px-4">
-              {ACTIVITIES_LIST.map((act, idx) => {
+              {pipelineActivities.map((act, idx) => {
                 const activeUnits = (Object.entries(activePipelines) as [string, { activity: string; model: string }][])
                   .filter(([_, data]) => {
-                    const matchesModel = selectedModelFilter === 'All' || data.model === selectedModelFilter;
-                    return data.activity === act && matchesModel;
+                    const matchesModel = selectedModelFilter === 'All' || data.model.trim().toUpperCase() === selectedModelFilter.trim().toUpperCase();
+                    // Robust Case-Insensitive activity matching
+                    const matchesActivity = data.activity.trim().toUpperCase() === act.trim().toUpperCase();
+                    return matchesActivity && matchesModel;
                   })
                   .map(([sn, data]) => ({ sn, model: data.model }));
 
                 return (
                   <div key={act} className="flex-1 flex flex-col items-center">
                     <div className="relative flex flex-col items-center w-full">
-                      {idx < ACTIVITIES_LIST.length - 1 && <div className="absolute top-5 left-1/2 w-full h-[2px] bg-slate-100 z-0"></div>}
+                      {idx < pipelineActivities.length - 1 && <div className="absolute top-5 left-1/2 w-full h-[2px] bg-slate-100 z-0"></div>}
                       <div className={`w-10 h-10 rounded-full border-4 flex items-center justify-center z-10 transition-all ${activeUnits.length > 0 ? 'bg-blue-600 border-blue-100' : 'bg-white border-slate-50'}`}>
                         <span className={`text-[11px] font-bold ${activeUnits.length > 0 ? 'text-white' : 'text-slate-300'}`}>{idx + 1}</span>
                       </div>
@@ -525,9 +558,14 @@ const Dashboard: React.FC<DashboardProps> = ({ entries }) => {
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
         <div className="bg-white p-8 rounded-3xl border border-slate-200 shadow-sm">
-          <div className="mb-6">
-            <h3 className="text-lg font-bold text-slate-900">Activity Performance Benchmark</h3>
-            <p className="text-sm text-slate-500">Standard vs. Actual cycle time (mins)</p>
+          <div className="mb-6 flex items-center gap-4">
+            <div className="p-2 bg-slate-50 rounded-xl text-blue-600 shadow-sm">
+              <TrendingUp size={20} />
+            </div>
+            <div>
+              <h3 className="text-lg font-bold text-slate-900">Activity Performance Benchmark</h3>
+              <p className="text-sm text-slate-500">Standard vs. Actual cycle time (mins)</p>
+            </div>
           </div>
           <div className="h-[300px]">
             <ResponsiveContainer width="100%" height="100%">
@@ -545,9 +583,14 @@ const Dashboard: React.FC<DashboardProps> = ({ entries }) => {
         </div>
 
         <div className="bg-white p-8 rounded-3xl border border-slate-200 shadow-sm">
-          <div className="mb-8">
-            <h3 className="text-lg font-bold text-slate-900">Bottleneck Analysis</h3>
-            <p className="text-sm text-slate-500">Aggregated loss hours by production activity</p>
+          <div className="mb-8 flex items-center gap-4">
+            <div className="p-2 bg-slate-50 rounded-xl text-rose-500 shadow-sm">
+              <AlertTriangle size={20} />
+            </div>
+            <div>
+              <h3 className="text-lg font-bold text-slate-900">Bottleneck Analysis</h3>
+              <p className="text-sm text-slate-500">Aggregated loss hours by production activity</p>
+            </div>
           </div>
           <div className="h-[250px]">
             <ResponsiveContainer width="100%" height="100%">

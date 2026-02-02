@@ -35,6 +35,7 @@ const ROLE_IDENTITY_MAP = {
 const App: React.FC = () => {
   const [session, setSession] = useState<any>(null);
   const [userRole, setUserRole] = useState<'admin' | 'operator' | 'management' | null>(null);
+  const [homePlant, setHomePlant] = useState<string>('CHAKAN');
   const [entries, setEntries] = useState<ProductionEntry[]>([]);
   const [activeTab, setActiveTab] = useState<'dashboard' | 'entry' | 'data' | 'insights' | 'manpower' | 'admin-manager'>('dashboard');
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -43,94 +44,111 @@ const App: React.FC = () => {
   const [initError, setInitError] = useState(false);
   const [showRetry, setShowRetry] = useState(false);
 
-  // Improved Role Fetching with Caching and longer timeout
-  const fetchUserRole = async (userId: string, email?: string): Promise<'admin' | 'operator' | 'management'> => {
+  const forceInitialize = () => {
+    setIsInitializing(false);
+  };
+
+  const clearLocalCaches = () => {
+    localStorage.removeItem('protrack_cached_role');
+    localStorage.removeItem('protrack_cached_plant');
+    localStorage.removeItem('supabase.auth.token');
+    localStorage.removeItem('sb-ekcgvhntoztulffwqefm-auth-token');
+    
+    Object.keys(localStorage).forEach(key => {
+      if (key.includes('supabase') || key.includes('protrack')) {
+        localStorage.removeItem(key);
+      }
+    });
+  };
+
+  const fetchUserRole = async (userId: string, email?: string): Promise<{role: 'admin' | 'operator' | 'management', plant: string}> => {
     const normalizedEmail = email?.toLowerCase();
     
-    // Hardcoded Admin Override
     if (normalizedEmail === 'nikhil.wange@vertiv.com' || normalizedEmail === 'admin@vertiv.com') {
       localStorage.setItem('protrack_cached_role', 'admin');
-      return 'admin';
+      return { role: 'admin', plant: 'CHAKAN' };
     }
 
-    // 1. Check Local Cache First (Fixes immediate downgrade on network blips)
     const cachedRole = localStorage.getItem('protrack_cached_role');
+    const cachedPlant = localStorage.getItem('protrack_cached_plant') || 'CHAKAN';
     
     try {
       const rolePromise = supabase
         .from('user_roles')
-        .select('role')
+        .select('role, home_plant')
         .eq('id', userId)
         .single();
 
-      // Increased timeout to 15 seconds for industrial environments
       const timeoutPromise = new Promise((_, reject) => 
-        setTimeout(() => reject(new Error("Network Timeout")), 15000)
+        setTimeout(() => reject(new Error("Role fetch timeout")), 8000)
       );
       
       const result: any = await Promise.race([rolePromise, timeoutPromise]);
       const { data, error } = result;
 
       if (error || !data) {
-        if (error && error.code !== "PGRST116") { // Not Found code
-          console.warn("Supabase fetch failed, using cache if available:", error.message);
-          return (cachedRole as any) || 'operator';
+        if (error && error.code !== "PGRST116") {
+          return { role: (cachedRole as any) || 'operator', plant: cachedPlant };
         }
         
-        // Auto-register if no role exists
-        const { error: insertError } = await supabase
+        await supabase
           .from('user_roles')
-          .insert([{ id: userId, role: 'operator' }]);
+          .insert([{ id: userId, role: 'operator', home_plant: 'CHAKAN' }]);
         
         localStorage.setItem('protrack_cached_role', 'operator');
-        return 'operator';
+        localStorage.setItem('protrack_cached_plant', 'CHAKAN');
+        return { role: 'operator', plant: 'CHAKAN' };
       }
       
       const fetchedRole = data.role?.trim().toLowerCase();
+      const fetchedPlant = data.home_plant || 'CHAKAN';
       const validRoles = ['admin', 'management', 'operator'];
       const finalRole = validRoles.includes(fetchedRole) ? fetchedRole : 'operator';
       
       localStorage.setItem('protrack_cached_role', finalRole);
-      return finalRole as any;
+      localStorage.setItem('protrack_cached_plant', fetchedPlant);
+      return { role: finalRole as any, plant: fetchedPlant };
 
     } catch (e: any) {
-      console.warn("Role fetch system engaged failover:", e.message);
-      // If we have a cached role, keep it. Don't force downgrade to operator on a simple timeout.
-      if (cachedRole && ['admin', 'management', 'operator'].includes(cachedRole)) {
-        return cachedRole as any;
-      }
-      return 'operator'; 
+      console.warn("Role fetch failover engaged:", e.message);
+      return { role: (cachedRole as any) || 'operator', plant: cachedPlant };
     }
   };
 
-  const forceInitialize = () => {
-    setIsInitializing(false);
-  };
-
   useEffect(() => {
-    const timer = setTimeout(() => {
-      setShowRetry(true);
-    }, 8000); // Wait longer before showing retry
+    const timer = setTimeout(() => setShowRetry(true), 4000);
 
     const initializeTerminal = async () => {
       try {
-        const { data: { session: currentSession } } = await supabase.auth.getSession();
+        const sessionPromise = supabase.auth.getSession();
+        const timeoutPromise = new Promise((_, reject) => 
+          setTimeout(() => reject(new Error("Auth check timeout")), 12000)
+        );
         
-        setSession(currentSession);
+        const result: any = await Promise.race([sessionPromise, timeoutPromise]);
         
-        if (currentSession) {
-          const role = await fetchUserRole(currentSession.user.id, currentSession.user.email);
-          setUserRole(role);
+        if (result.error) {
+          console.error("Session Error detected:", result.error.message);
+          if (result.error.message.includes('refresh_token') || result.error.message.includes('not found')) {
+            clearLocalCaches();
+            setSession(null);
+          }
         } else {
-          setUserRole(null);
-          localStorage.removeItem('protrack_cached_role');
+          const currentSession = result.data.session;
+          setSession(currentSession);
+          if (currentSession) {
+            const { role, plant } = await fetchUserRole(currentSession.user.id, currentSession.user.email);
+            setUserRole(role);
+            setHomePlant(plant);
+          }
         }
-      } catch (err) {
-        console.error("Initialization error:", err);
+      } catch (err: any) {
+        console.error("Initialization check failed critically:", err.message);
         setInitError(true);
-        // Look at cache even in total auth failure
-        const cached = localStorage.getItem('protrack_cached_role');
-        if (cached) setUserRole(cached as any);
+        if (err.message.includes('token') || err.message.includes('refresh')) {
+          clearLocalCaches();
+          setSession(null);
+        }
       } finally {
         setIsInitializing(false);
         clearTimeout(timer);
@@ -140,14 +158,19 @@ const App: React.FC = () => {
     initializeTerminal();
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, newSession) => {
+      if (event === 'SIGNED_OUT' || event === 'USER_DELETED') {
+        setSession(null);
+        setUserRole(null);
+        clearLocalCaches();
+        setActiveTab('dashboard');
+        return;
+      }
+
       setSession(newSession);
       if (newSession) {
-        const role = await fetchUserRole(newSession.user.id, newSession.user.email);
+        const { role, plant } = await fetchUserRole(newSession.user.id, newSession.user.email);
         setUserRole(role);
-      } else {
-        setUserRole(null);
-        localStorage.removeItem('protrack_cached_role');
-        if (event === 'SIGNED_OUT') setActiveTab('dashboard');
+        setHomePlant(plant);
       }
     });
 
@@ -157,20 +180,43 @@ const App: React.FC = () => {
     };
   }, []);
 
+  const handleLogout = async () => {
+    try {
+      await supabase.auth.signOut();
+    } catch (err) {
+      console.warn("Supabase signout call failed, forcing local cleanup:", err);
+    } finally {
+      clearLocalCaches();
+      setSession(null);
+      setUserRole(null);
+      setActiveTab('dashboard');
+    }
+  };
+
   const fetchCloudData = async () => {
-    if (!session) return;
+    // Data isolation: Do not fetch until userRole and homePlant are defined
+    if (!session || !userRole) return;
+    
     setIsSyncing(true);
     try {
-      const { data, error } = await supabase
+      let query = supabase
         .from('production_entries')
         .select('*')
         .order('created_at', { ascending: false });
 
-      if (error) throw error;
+      // Apply Plant-Based Isolation: 
+      // Only Admins can see cross-plant data. Management/Operators are restricted to their home plant.
+      if (userRole !== 'admin') {
+        query = query.eq('plant', homePlant);
+      }
 
+      const { data, error } = await query;
+
+      if (error) throw error;
       if (data) {
-        const mappedData: ProductionEntry[] = data.map(item => ({
+        setEntries(data.map(item => ({
           id: String(item.id),
+          plant: item.plant || 'CHAKAN',
           stage: item.station || '',     
           productLine: item.product_line || '',
           model: item.model || '',
@@ -201,34 +247,37 @@ const App: React.FC = () => {
           status: item.status || 'Completed',
           createdAt: item.created_at || new Date().toISOString(),
           userEmail: item.user_email
-        }));
-        setEntries(mappedData);
+        })));
       }
     } catch (e: any) {
-      console.warn("Sync Issue: Network interrupted. Retrying in background.", e.message);
-      // Exponential backoff or simple retry could go here
+      console.warn("Sync Issue:", e.message);
     } finally {
       setIsSyncing(false);
     }
   };
 
   useEffect(() => {
-    if (session) {
+    // Re-fetch whenever session, role or plant changes to maintain data isolation
+    if (session && userRole) {
       fetchCloudData();
       const channel = supabase.channel('realtime_production')
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'production_entries' }, () => fetchCloudData())
+        .on('postgres_changes', { 
+          event: '*', 
+          schema: 'public', 
+          table: 'production_entries' 
+        }, () => fetchCloudData())
         .subscribe();
       return () => { supabase.removeChannel(channel); };
     }
-  }, [session]);
+  }, [session, userRole, homePlant]);
 
   const handleAddEntry = async (entryOrEntries: ProductionEntry | ProductionEntry[]) => {
     const newEntries = Array.isArray(entryOrEntries) ? entryOrEntries : [entryOrEntries];
-
     setIsSyncing(true);
     try {
       const upserts = newEntries.map(newEntry => {
         const entryData: any = {
+          plant: newEntry.plant,
           station: newEntry.stage,         
           product_line: newEntry.productLine,
           model: newEntry.model,
@@ -259,24 +308,17 @@ const App: React.FC = () => {
           status: newEntry.status,
           user_email: session?.user?.email || 'unknown'
         };
-
         if (newEntry.id && !isNaN(Number(newEntry.id)) && String(newEntry.id).length < 10) {
           entryData.id = Number(newEntry.id);
         }
-        
         return entryData;
       });
-
       const { error } = await supabase.from('production_entries').upsert(upserts);
       if (error) throw error;
-      
-      if (newEntries.some(e => e.status === 'Completed')) {
-        setActiveTab('dashboard');
-      }
+      if (newEntries.some(e => e.status === 'Completed')) setActiveTab('dashboard');
       fetchCloudData(); 
     } catch (e: any) {
-      console.error("Database connection lost:", e.message);
-      alert(`Terminal Sync Failure: Check network connection. Data remains in session cache. Error: ${e.message}`);
+      alert(`Terminal Sync Failure: ${e.message}`);
     } finally {
       setIsSyncing(false);
     }
@@ -287,6 +329,7 @@ const App: React.FC = () => {
     setIsSyncing(true);
     try {
       const { error } = await supabase.from('production_entries').update({
+        plant: updatedEntry.plant,
         station: updatedEntry.stage,     
         product_line: updatedEntry.productLine,
         model: updatedEntry.model,
@@ -319,29 +362,21 @@ const App: React.FC = () => {
       if (error) throw error;
       fetchCloudData();
     } catch (e: any) {
-      console.error("Update failed:", e.message);
-      alert(`System Error: Could not synchronize updates with cloud. ${e.message}`);
+      alert(`Update failed: ${e.message}`);
     } finally {
       setIsSyncing(false);
     }
   };
 
   const handleDeleteEntry = async (id: string) => {
-    if (userRole !== 'admin') {
-      alert("Unauthorized: Administrator permissions required.");
-      return;
-    }
+    if (userRole !== 'admin') return;
     if (!confirm('Permanently delete record?')) return;
     setIsSyncing(true);
     try {
       const { error } = await supabase.from('production_entries').delete().eq('id', Number(id));
       if (error) throw error;
       fetchCloudData();
-    } catch (e: any) { 
-      console.error("Delete failed:", e.message); 
-    } finally { 
-      setIsSyncing(false); 
-    }
+    } catch (e: any) { console.error(e.message); } finally { setIsSyncing(false); }
   };
 
   const toggleFullscreen = () => {
@@ -349,41 +384,37 @@ const App: React.FC = () => {
     else document.exitFullscreen();
   };
 
-  if (isInitializing) {
-    return (
-      <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center text-white gap-6 px-6">
-        <div className="relative">
-          <Loader2 className="animate-spin text-blue-500" size={64} />
-          {showRetry && <WifiOff className="absolute -top-1 -right-1 text-rose-500 animate-pulse" size={20} />}
+  if (isInitializing) return (
+    <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center text-white gap-8 px-6">
+      <div className="relative p-12 border-2 border-blue-500/30 rounded-3xl flex flex-col items-center gap-6 animate-in fade-in zoom-in duration-500 max-w-sm w-full bg-slate-900/50 backdrop-blur-xl">
+        <Loader2 className="animate-spin text-blue-500" size={64} />
+        <div className="text-center space-y-2">
+          <p className="text-sm font-bold tracking-[0.2em] uppercase opacity-90">Synchronizing Universal Terminal...</p>
+          <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">Verifying Identity & Keys</p>
         </div>
         
-        <div className="text-center space-y-2">
-          <p className="text-sm font-bold tracking-[0.2em] uppercase opacity-70">Synchronizing Universal Terminal Identity...</p>
-          <p className="text-xs text-slate-500 font-medium">Establishing secure connection to Supabase Cloud</p>
-          {showRetry && (
-            <p className="text-[10px] font-medium text-slate-500 uppercase tracking-widest animate-in fade-in duration-500">
-              Connection taking longer than expected due to network latency
-            </p>
-          )}
-        </div>
-
         {showRetry && (
-          <button 
-            onClick={forceInitialize}
-            className="flex items-center gap-2 px-6 py-2.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-black uppercase tracking-widest rounded-full transition-all shadow-xl shadow-blue-500/20 animate-in slide-in-from-bottom-2"
-          >
-            <RefreshCcw size={14} /> Force Start Offline Mode
-          </button>
+          <div className="pt-4 flex flex-col items-center gap-4 w-full animate-in slide-in-from-bottom-4">
+            <button 
+              onClick={forceInitialize}
+              className="w-full flex items-center justify-center gap-2 px-6 py-3 bg-blue-600 hover:bg-blue-50 text-white text-[11px] font-black uppercase tracking-widest rounded-xl transition-all shadow-2xl shadow-blue-500/20 active:scale-[0.98]"
+            >
+              <RefreshCcw size={14} /> Force Start Offline Mode
+            </button>
+            <div className="flex items-center gap-2 text-[9px] text-slate-400 font-bold uppercase tracking-tighter">
+              <WifiOff size={12} className="text-rose-500" />
+              Connection Latency Detected
+            </div>
+          </div>
         )}
       </div>
-    );
-  }
+    </div>
+  );
 
   if (!session) return <Auth />;
 
   const isAdmin = userRole === 'admin';
   const currentRoleIdentity = userRole ? ROLE_IDENTITY_MAP[userRole] : ROLE_IDENTITY_MAP.operator;
-  const canAccessDatabase = userRole === 'admin' || userRole === 'operator' || userRole === 'management';
 
   return (
     <div className="min-h-screen flex flex-col lg:flex-row bg-slate-50">
@@ -391,24 +422,20 @@ const App: React.FC = () => {
         <div className="p-6 flex items-center gap-3">
           <Factory size={24} className="text-blue-500" />
           <div>
-            <h1 className="font-bold text-md leading-tight tracking-tight">Vertiv ProTrack</h1>
-            <p className="text-[9px] text-slate-400 font-semibold uppercase tracking-[0.15em]">Enterprise MES</p>
+            <h1 className="font-bold text-md tracking-tight">Vertiv ProTrack</h1>
+            <p className="text-[9px] text-slate-400 font-semibold uppercase tracking-widest">Enterprise MES</p>
           </div>
         </div>
         <div className="mt-4 px-3 space-y-1">
-          <NavItem active={activeTab === 'dashboard'} onClick={() => setActiveTab('dashboard'} icon={<LayoutDashboard size={20} />} label="Dashboard" />
-          <NavItem active={activeTab === 'entry'} onClick={() => setActiveTab('entry'} icon={<ClipboardList size={20} />} label="Operator Input" />
-          <NavItem active={activeTab === 'manpower'} onClick={() => setActiveTab('manpower'} icon={<Users size={20} />} label="Manpower Registry" />
-          
-          {canAccessDatabase && (
-            <NavItem active={activeTab === 'data'} onClick={() => setActiveTab('data'} icon={<Database size={20} />} label="Database View" />
-          )}
-          
+          <NavItem active={activeTab === 'dashboard'} onClick={() => setActiveTab('dashboard')} icon={<LayoutDashboard size={20} />} label="Dashboard" />
+          <NavItem active={activeTab === 'entry'} onClick={() => setActiveTab('entry')} icon={<ClipboardList size={20} />} label="Operator Input" />
+          <NavItem active={activeTab === 'manpower'} onClick={() => setActiveTab('manpower')} icon={<Users size={20} />} label="Manpower Registry" />
+          <NavItem active={activeTab === 'data'} onClick={() => setActiveTab('data')} icon={<Database size={20} />} label="Database View" />
           {isAdmin && (
             <>
               <div className="mx-4 my-4 h-px bg-slate-800" />
-              <NavItem active={activeTab === 'insights'} onClick={() => setActiveTab('insights'} icon={<Sparkles size={20} />} label="Ai Strategic Insights" />
-              <NavItem active={activeTab === 'admin-manager'} onClick={() => setActiveTab('admin-manager'} icon={<Settings size={20} />} label="System Management" />
+              <NavItem active={activeTab === 'insights'} onClick={() => setActiveTab('insights')} icon={<Sparkles size={20} />} label="Ai Strategic Insights" />
+              <NavItem active={activeTab === 'admin-manager'} onClick={() => setActiveTab('admin-manager')} icon={<Settings size={20} />} label="System Management" />
             </>
           )}
         </div>
@@ -421,10 +448,7 @@ const App: React.FC = () => {
                 {currentRoleIdentity.label}
               </p>
             </div>
-            <button onClick={() => {
-              localStorage.removeItem('protrack_cached_role');
-              supabase.auth.signOut();
-            }} className="mt-4 w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-slate-700 hover:bg-rose-900 transition-all text-xs font-bold text-white shadow-sm">
+            <button onClick={handleLogout} className="mt-4 w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-slate-700 hover:bg-rose-900 transition-all text-xs font-bold text-white shadow-sm">
               <LogOut size={14} /> Termination Log
             </button>
           </div>
@@ -433,72 +457,48 @@ const App: React.FC = () => {
       <main className="flex-1 overflow-y-auto relative">
         <header className="bg-white border-b border-slate-200 px-8 py-6 flex flex-col md:flex-row md:items-center justify-between sticky top-0 z-10 gap-4">
           <div className="flex items-center gap-4">
-            <span className="text-2xl" role="img">
-              {activeTab === 'dashboard' && "📊"}
-              {activeTab === 'entry' && "📝"}
-              {activeTab === 'manpower' && "👥"}
-              {activeTab === 'data' && "💾"}
-              {activeTab === 'insights' && "🤖"}
-              {activeTab === 'admin-manager' && "⚙️"}
-            </span>
-            <div>
-              <h2 className="text-xl font-black text-slate-900 tracking-tight">
-                {activeTab === 'dashboard' && 'Analytics Dashboard'}
-                {activeTab === 'entry' && 'Operator Log Terminal'}
-                {activeTab === 'manpower' && 'Resource Allocation Registry'}
-                {activeTab === 'data' && 'Enterprise Production Database'}
-                {activeTab === 'insights' && 'Strategic AI Analytics'}
-                {activeTab === 'admin-manager' && 'Administration Console'}
-              </h2>
-              <p className="text-[11px] text-slate-500 font-bold tracking-tight">
-                Live monitoring powered by Supabase Cloud Engine
-              </p>
+            <div className="flex items-center gap-3">
+              <div className="p-2.5 bg-slate-50 rounded-2xl text-blue-600 shadow-sm">
+                {activeTab === 'dashboard' && <LayoutDashboard size={22} />}
+                {activeTab === 'entry' && <ClipboardList size={22} />}
+                {activeTab === 'manpower' && <Users size={22} />}
+                {activeTab === 'data' && <Database size={22} />}
+                {activeTab === 'insights' && <Sparkles size={22} />}
+                {activeTab === 'admin-manager' && <Settings size={22} />}
+              </div>
+              <div>
+                <h2 className="text-xl font-black text-slate-900 tracking-tight">
+                  {activeTab === 'dashboard' && 'Analytics Dashboard'}
+                  {activeTab === 'entry' && 'Operator Log Terminal'}
+                  {activeTab === 'manpower' && 'Resource Allocation Registry'}
+                  {activeTab === 'data' && 'Enterprise Production Database'}
+                  {activeTab === 'insights' && 'Strategic AI Analytics'}
+                  {activeTab === 'admin-manager' && 'Administration Console'}
+                </h2>
+                <p className="text-[11px] text-slate-500 font-bold tracking-tight">
+                  Monitoring Plant: {homePlant} • Powered by Supabase
+                </p>
+              </div>
             </div>
           </div>
           <div className="flex items-center gap-3">
-            <div className="hidden sm:flex flex-col items-end mr-2">
-              <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Supabase Cloud Sync</span>
-              <span className="text-xs font-bold text-slate-900">{entries.length} Records</span>
-            </div>
-            <button 
-              onClick={fetchCloudData}
-              title="Refresh Data"
-              className={`p-2 rounded-lg transition-all ${isSyncing ? 'animate-spin bg-blue-50 text-blue-500' : 'hover:bg-slate-100 text-slate-400'}`}
-            >
+            <button onClick={fetchCloudData} className={`p-2 rounded-lg transition-all ${isSyncing ? 'animate-spin bg-blue-50 text-blue-500' : 'hover:bg-slate-100 text-slate-400'}`}>
               <RefreshCcw size={16} />
             </button>
-            <div className={`w-3 h-3 rounded-full ${isSyncing ? 'bg-blue-500 animate-pulse' : 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]'}`}></div>
+            <div className={`w-3 h-3 rounded-full ${isSyncing ? 'bg-blue-500 animate-pulse' : 'bg-emerald-500'}`}></div>
           </div>
         </header>
 
         <div className="p-4 md:p-8 max-w-7xl mx-auto w-full">
-          {activeTab === 'dashboard' && <Dashboard entries={entries} />}
-          {activeTab === 'entry' && <OperatorEntry onAddEntry={handleAddEntry} entries={entries} />}
+          {activeTab === 'dashboard' && <Dashboard entries={entries} plant={homePlant} />}
+          {activeTab === 'entry' && <OperatorEntry onAddEntry={handleAddEntry} entries={entries} plant={homePlant} />}
           {activeTab === 'manpower' && <ManpowerSummary entries={entries} />}
           {activeTab === 'data' && <DataTable entries={entries} onDelete={handleDeleteEntry} isAdmin={isAdmin} />}
-          
-          {isAdmin && (
-            <>
-              {activeTab === 'admin-manager' && <AdminManager entries={entries} onUpdate={handleUpdateEntry} onDelete={handleDeleteEntry} onClear={fetchCloudData} isAdmin={isAdmin} />}
-              {activeTab === 'insights' && <GeminiInsights entries={entries} />}
-            </>
-          )}
-
-          {!isAdmin && ['insights', 'admin-manager'].includes(activeTab) && (
-            <div className="flex flex-col items-center justify-center py-32 space-y-6">
-              <div className="p-8 bg-amber-50 rounded-[3rem] border border-amber-100 shadow-sm animate-shake">
-                <ShieldAlert size={80} className="text-amber-500" />
-              </div>
-              <div className="text-center space-y-2">
-                <h3 className="text-2xl font-black text-slate-900 uppercase tracking-widest">Access Restricted</h3>
-                <p className="text-slate-500 text-sm max-w-sm font-medium">This terminal section is reserved for authenticated administrators only. Please return to the Operator Terminal.</p>
-              </div>
-              <button onClick={() => setActiveTab('entry')} className="px-8 py-3 bg-slate-900 text-white rounded-2xl text-xs font-bold hover:bg-slate-800 transition-all uppercase tracking-widest shadow-xl">Return to Terminal</button>
-            </div>
-          )}
+          {isAdmin && activeTab === 'admin-manager' && <AdminManager entries={entries} onUpdate={handleUpdateEntry} onDelete={handleDeleteEntry} onClear={fetchCloudData} isAdmin={isAdmin} />}
+          {isAdmin && activeTab === 'insights' && <GeminiInsights entries={entries} />}
         </div>
       </main>
-      <button onClick={toggleFullscreen} className="fixed bottom-6 left-6 z-[100] p-3.5 bg-slate-900/90 backdrop-blur-md text-white rounded-full shadow-2xl transition-all border border-slate-700 hover:scale-110 active:scale-95">
+      <button onClick={toggleFullscreen} className="fixed bottom-6 left-6 z-[100] p-3.5 bg-slate-900/90 text-white rounded-full shadow-2xl transition-all hover:scale-110">
         {isFullscreen ? <Minimize size={22} /> : <Maximize size={22} />}
       </button>
     </div>
