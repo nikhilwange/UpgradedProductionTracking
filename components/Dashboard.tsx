@@ -3,7 +3,7 @@ import React, { useMemo, useState, useEffect } from 'react';
 import { 
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer 
 } from 'recharts';
-import { TrendingUp, Clock, AlertTriangle, Package, ChevronDown, Activity as ActivityIcon, FileText, Timer } from 'lucide-react';
+import { TrendingUp, Clock, AlertTriangle, Package, ChevronDown, Activity as ActivityIcon, FileText, Timer, Filter } from 'lucide-react';
 import { ProductionEntry } from '../types';
 import { ACTIVITIES_LIST, ACTIVITY_STANDARDS } from '../constants';
 
@@ -13,6 +13,7 @@ interface DashboardProps {
 
 const Dashboard: React.FC<DashboardProps> = ({ entries }) => {
   const [selectedSerial, setSelectedSerial] = useState<string | null>(null);
+  const [selectedModelFilter, setSelectedModelFilter] = useState<string>('All');
 
   const toTitleCase = (str: string) => {
     if (!str) return 'N/A';
@@ -34,15 +35,22 @@ const Dashboard: React.FC<DashboardProps> = ({ entries }) => {
     return `${d}-${m}-${y}`;
   };
 
-  const stats = useMemo(() => {
-    if (!entries.length) return null;
-    const uniqueUnits = new Set(entries.map(e => e.serialNo)).size;
-    const totalManhours = entries.reduce((acc, e) => acc + e.manhoursEngaged, 0);
-    const avgVariance = entries.reduce((acc, e) => acc + e.variance, 0) / (entries.length || 1);
-    const totalLoss = entries.reduce((acc, e) => acc + e.lossHours, 0);
-    return { uniqueUnits, totalManhours, avgVariance, totalLoss };
-  }, [entries]);
+  // 1. Filtered entries for aggregate analytics (KPIs and Charts)
+  const filteredEntriesByModel = useMemo(() => {
+    if (selectedModelFilter === 'All') return entries;
+    return entries.filter(e => e.model === selectedModelFilter);
+  }, [entries, selectedModelFilter]);
 
+  const stats = useMemo(() => {
+    if (!filteredEntriesByModel.length) return null;
+    const uniqueUnits = new Set(filteredEntriesByModel.map(e => e.serialNo)).size;
+    const totalManhours = filteredEntriesByModel.reduce((acc, e) => acc + e.manhoursEngaged, 0);
+    const avgVariance = filteredEntriesByModel.reduce((acc, e) => acc + e.variance, 0) / (filteredEntriesByModel.length || 1);
+    const totalLoss = filteredEntriesByModel.reduce((acc, e) => acc + e.lossHours, 0);
+    return { uniqueUnits, totalManhours, avgVariance, totalLoss };
+  }, [filteredEntriesByModel]);
+
+  // Original units list based on all entries for dropdown selection
   const unitsList = useMemo(() => {
     const units: Record<string, { 
       serialNo: string; 
@@ -70,11 +78,28 @@ const Dashboard: React.FC<DashboardProps> = ({ entries }) => {
     return Object.values(units).sort((a, b) => new Date(b.lastEntry.createdAt).getTime() - new Date(a.lastEntry.createdAt).getTime());
   }, [entries]);
 
+  // Derived filtered list for the unit selector dropdown
+  const filteredUnitsList = useMemo(() => {
+    if (selectedModelFilter === 'All') return unitsList;
+    return unitsList.filter(u => u.model === selectedModelFilter);
+  }, [unitsList, selectedModelFilter]);
+
+  const availableModels = useMemo(() => {
+    const models = new Set(unitsList.map(u => u.model));
+    return ['All', ...Array.from(models).sort()];
+  }, [unitsList]);
+
+  // Reset selected serial when filter changes if current selection is no longer valid
   useEffect(() => {
-    if (unitsList.length > 0 && !selectedSerial) {
-      setSelectedSerial(unitsList[0].serialNo);
+    if (filteredUnitsList.length > 0) {
+      const isStillValid = filteredUnitsList.some(u => u.serialNo === selectedSerial);
+      if (!isStillValid) {
+        setSelectedSerial(filteredUnitsList[0].serialNo);
+      }
+    } else {
+      setSelectedSerial(null);
     }
-  }, [unitsList, selectedSerial]);
+  }, [filteredUnitsList, selectedSerial]);
 
   const selectedUnitDetail = useMemo(() => {
     if (!selectedSerial) return null;
@@ -87,7 +112,6 @@ const Dashboard: React.FC<DashboardProps> = ({ entries }) => {
     const prodEntries = [...selectedUnitDetail.allEntries]
       .filter(e => {
         const isIdle = e.activity === "Inter-Activity Idle Time";
-        // Exclude "In Progress" placeholder entries that have no manpower (pure start logs)
         const isPlaceholder = e.status === 'In Progress' && e.manpower === 0;
         return !isIdle && !isPlaceholder;
       })
@@ -172,8 +196,7 @@ const Dashboard: React.FC<DashboardProps> = ({ entries }) => {
 
   const benchmarkData = useMemo(() => {
     const activityData: Record<string, { standard: number; actualTotal: number; count: number }> = {};
-    entries.forEach(e => {
-      // Don't benchmark placeholder start entries
+    filteredEntriesByModel.forEach(e => {
       if (e.status === 'In Progress' && e.manpower === 0) return;
       
       if (!activityData[e.activity]) {
@@ -185,17 +208,17 @@ const Dashboard: React.FC<DashboardProps> = ({ entries }) => {
     return Object.entries(activityData)
       .map(([name, data]) => ({ name, Standard: data.standard, Actual: Math.round(data.actualTotal / data.count) }))
       .slice(0, 5);
-  }, [entries]);
+  }, [filteredEntriesByModel]);
 
   const bottleneckData = useMemo(() => {
     const losses: Record<string, number> = {};
-    entries.forEach(e => {
+    filteredEntriesByModel.forEach(e => {
       losses[e.activity] = (losses[e.activity] || 0) + e.lossHours;
     });
     return Object.entries(losses)
       .map(([name, hours]) => ({ name, hours }))
       .sort((a, b) => b.hours - a.hours);
-  }, [entries]);
+  }, [filteredEntriesByModel]);
 
   const activePipelines = useMemo(() => {
     const lastSeen: Record<string, { activity: string; model: string }> = {};
@@ -229,40 +252,68 @@ const Dashboard: React.FC<DashboardProps> = ({ entries }) => {
         <KPICard icon={<AlertTriangle className="text-rose-500" />} label="Loss Time" value={stats?.totalLoss.toFixed(1) || '0'} unit="Hrs" subtext="Aggregate downtime" />
       </div>
 
-      <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm overflow-hidden">
-        <div className="flex items-center justify-between mb-6 px-2">
-          <div>
-            <h3 className="text-lg font-bold text-slate-900">Live Production Pipeline</h3>
-            <p className="text-sm text-slate-500">Real-time unit location across all activities</p>
+      <div className="flex flex-col gap-4">
+        <div className="flex items-center gap-2 px-2 overflow-x-auto custom-scrollbar pb-2">
+          <div className="flex items-center gap-2 bg-slate-100 p-1.5 rounded-2xl border border-slate-200 shadow-sm">
+            <div className="p-1.5 bg-white rounded-lg shadow-sm">
+              <Filter size={14} className="text-slate-400" />
+            </div>
+            <div className="flex gap-1">
+              {availableModels.map((model) => (
+                <button
+                  key={model}
+                  onClick={() => setSelectedModelFilter(model)}
+                  className={`px-4 py-1.5 rounded-xl text-[11px] font-black uppercase tracking-wider transition-all whitespace-nowrap ${
+                    selectedModelFilter === model
+                      ? 'bg-blue-600 text-white shadow-md'
+                      : 'text-slate-500 hover:bg-white hover:text-slate-900'
+                  }`}
+                >
+                  {model}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
-        <div className="relative overflow-x-auto pb-4 custom-scrollbar">
-          <div className="flex items-start min-w-[2500px] gap-0 px-4">
-            {ACTIVITIES_LIST.map((act, idx) => {
-              const activeUnits = (Object.entries(activePipelines) as [string, { activity: string; model: string }][])
-                .filter(([_, data]) => data.activity === act)
-                .map(([sn, data]) => ({ sn, model: data.model }));
 
-              return (
-                <div key={act} className="flex-1 flex flex-col items-center">
-                  <div className="relative flex flex-col items-center w-full">
-                    {idx < ACTIVITIES_LIST.length - 1 && <div className="absolute top-5 left-1/2 w-full h-[2px] bg-slate-100 z-0"></div>}
-                    <div className={`w-10 h-10 rounded-full border-4 flex items-center justify-center z-10 transition-all ${activeUnits.length > 0 ? 'bg-blue-600 border-blue-100' : 'bg-white border-slate-50'}`}>
-                      <span className={`text-[11px] font-bold ${activeUnits.length > 0 ? 'text-white' : 'text-slate-300'}`}>{idx + 1}</span>
-                    </div>
-                    <div className="mt-3 text-center px-2 h-10 text-[10px] font-bold text-slate-500 uppercase tracking-tight line-clamp-2 leading-tight">{act}</div>
-                    <div className="mt-4 flex flex-col gap-1.5 w-full items-center min-h-[70px]">
-                      {activeUnits.map(unit => (
-                        <button key={unit.sn} onClick={() => setSelectedSerial(unit.sn)} className="px-2.5 py-1.5 bg-blue-50 border border-blue-200 rounded-lg text-[10px] font-bold text-blue-700 whitespace-nowrap hover:bg-blue-100 transition-all flex flex-col items-center shadow-sm">
-                          <span className="opacity-60 text-[8px] uppercase">{unit.model}</span>
-                          <span>{unit.sn}</span>
-                        </button>
-                      ))}
+        <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm overflow-hidden">
+          <div className="flex items-center justify-between mb-6 px-2">
+            <div>
+              <h3 className="text-lg font-bold text-slate-900">Live Production Pipeline</h3>
+              <p className="text-sm text-slate-500">Real-time unit location across all activities</p>
+            </div>
+          </div>
+          <div className="relative overflow-x-auto pb-4 custom-scrollbar">
+            <div className="flex items-start min-w-[2500px] gap-0 px-4">
+              {ACTIVITIES_LIST.map((act, idx) => {
+                const activeUnits = (Object.entries(activePipelines) as [string, { activity: string; model: string }][])
+                  .filter(([_, data]) => {
+                    const matchesModel = selectedModelFilter === 'All' || data.model === selectedModelFilter;
+                    return data.activity === act && matchesModel;
+                  })
+                  .map(([sn, data]) => ({ sn, model: data.model }));
+
+                return (
+                  <div key={act} className="flex-1 flex flex-col items-center">
+                    <div className="relative flex flex-col items-center w-full">
+                      {idx < ACTIVITIES_LIST.length - 1 && <div className="absolute top-5 left-1/2 w-full h-[2px] bg-slate-100 z-0"></div>}
+                      <div className={`w-10 h-10 rounded-full border-4 flex items-center justify-center z-10 transition-all ${activeUnits.length > 0 ? 'bg-blue-600 border-blue-100' : 'bg-white border-slate-50'}`}>
+                        <span className={`text-[11px] font-bold ${activeUnits.length > 0 ? 'text-white' : 'text-slate-300'}`}>{idx + 1}</span>
+                      </div>
+                      <div className="mt-3 text-center px-2 h-10 text-[10px] font-bold text-slate-500 uppercase tracking-tight line-clamp-2 leading-tight">{act}</div>
+                      <div className="mt-4 flex flex-col gap-1.5 w-full items-center min-h-[70px]">
+                        {activeUnits.map(unit => (
+                          <button key={unit.sn} onClick={() => setSelectedSerial(unit.sn)} className="px-2.5 py-1.5 bg-blue-50 border border-blue-200 rounded-lg text-[10px] font-bold text-blue-700 whitespace-nowrap hover:bg-blue-100 transition-all flex flex-col items-center shadow-sm">
+                            <span className="opacity-60 text-[8px] uppercase">{unit.model}</span>
+                            <span>{unit.sn}</span>
+                          </button>
+                        ))}
+                      </div>
                     </div>
                   </div>
-                </div>
-              );
-            })}
+                );
+              })}
+            </div>
           </div>
         </div>
       </div>
@@ -280,7 +331,7 @@ const Dashboard: React.FC<DashboardProps> = ({ entries }) => {
                   onChange={(e) => setSelectedSerial(e.target.value)}
                   className="w-full pl-6 pr-10 py-3 bg-white border border-slate-200 rounded-2xl outline-none text-sm font-black text-slate-900 appearance-none focus:border-blue-500 transition-all shadow-sm"
                 >
-                  {unitsList.map(u => (
+                  {filteredUnitsList.map(u => (
                     <option key={u.serialNo} value={u.serialNo}>{u.model} — {u.serialNo}</option>
                   ))}
                 </select>
