@@ -43,12 +43,19 @@ const App: React.FC = () => {
   const [initError, setInitError] = useState(false);
   const [showRetry, setShowRetry] = useState(false);
 
+  // Improved Role Fetching with Caching and longer timeout
   const fetchUserRole = async (userId: string, email?: string): Promise<'admin' | 'operator' | 'management'> => {
     const normalizedEmail = email?.toLowerCase();
+    
+    // Hardcoded Admin Override
     if (normalizedEmail === 'nikhil.wange@vertiv.com' || normalizedEmail === 'admin@vertiv.com') {
+      localStorage.setItem('protrack_cached_role', 'admin');
       return 'admin';
     }
 
+    // 1. Check Local Cache First (Fixes immediate downgrade on network blips)
+    const cachedRole = localStorage.getItem('protrack_cached_role');
+    
     try {
       const rolePromise = supabase
         .from('user_roles')
@@ -56,27 +63,42 @@ const App: React.FC = () => {
         .eq('id', userId)
         .single();
 
-      const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout")), 3000));
+      // Increased timeout to 15 seconds for industrial environments
+      const timeoutPromise = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error("Network Timeout")), 15000)
+      );
       
-      const { data, error }: any = await Promise.race([rolePromise, timeoutPromise]);
+      const result: any = await Promise.race([rolePromise, timeoutPromise]);
+      const { data, error } = result;
 
       if (error || !data) {
-        if (error && error.message !== "Timeout") {
-           const { error: insertError } = await supabase
-            .from('user_roles')
-            .insert([{ id: userId, role: 'operator' }]);
-          if (insertError) console.warn("Auto-registration notice:", insertError.message);
+        if (error && error.code !== "PGRST116") { // Not Found code
+          console.warn("Supabase fetch failed, using cache if available:", error.message);
+          return (cachedRole as any) || 'operator';
         }
+        
+        // Auto-register if no role exists
+        const { error: insertError } = await supabase
+          .from('user_roles')
+          .insert([{ id: userId, role: 'operator' }]);
+        
+        localStorage.setItem('protrack_cached_role', 'operator');
         return 'operator';
       }
       
       const fetchedRole = data.role?.trim().toLowerCase();
-      if (fetchedRole === 'admin' || fetchedRole === 'management' || fetchedRole === 'operator') {
-        return fetchedRole as 'admin' | 'management' | 'operator';
+      const validRoles = ['admin', 'management', 'operator'];
+      const finalRole = validRoles.includes(fetchedRole) ? fetchedRole : 'operator';
+      
+      localStorage.setItem('protrack_cached_role', finalRole);
+      return finalRole as any;
+
+    } catch (e: any) {
+      console.warn("Role fetch system engaged failover:", e.message);
+      // If we have a cached role, keep it. Don't force downgrade to operator on a simple timeout.
+      if (cachedRole && ['admin', 'management', 'operator'].includes(cachedRole)) {
+        return cachedRole as any;
       }
-      return 'operator';
-    } catch (e) {
-      console.warn("Role fetch failover active:", e);
       return 'operator'; 
     }
   };
@@ -88,15 +110,11 @@ const App: React.FC = () => {
   useEffect(() => {
     const timer = setTimeout(() => {
       setShowRetry(true);
-    }, 4000);
+    }, 8000); // Wait longer before showing retry
 
     const initializeTerminal = async () => {
       try {
-        const sessionPromise = supabase.auth.getSession();
-        const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("Auth Timeout")), 6000));
-
-        const result: any = await Promise.race([sessionPromise, timeoutPromise]);
-        const currentSession = result?.data?.session;
+        const { data: { session: currentSession } } = await supabase.auth.getSession();
         
         setSession(currentSession);
         
@@ -105,11 +123,14 @@ const App: React.FC = () => {
           setUserRole(role);
         } else {
           setUserRole(null);
+          localStorage.removeItem('protrack_cached_role');
         }
       } catch (err) {
         console.error("Initialization error:", err);
         setInitError(true);
-        setUserRole('operator'); 
+        // Look at cache even in total auth failure
+        const cached = localStorage.getItem('protrack_cached_role');
+        if (cached) setUserRole(cached as any);
       } finally {
         setIsInitializing(false);
         clearTimeout(timer);
@@ -118,14 +139,15 @@ const App: React.FC = () => {
 
     initializeTerminal();
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, newSession) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, newSession) => {
       setSession(newSession);
       if (newSession) {
         const role = await fetchUserRole(newSession.user.id, newSession.user.email);
         setUserRole(role);
       } else {
         setUserRole(null);
-        setActiveTab('dashboard');
+        localStorage.removeItem('protrack_cached_role');
+        if (event === 'SIGNED_OUT') setActiveTab('dashboard');
       }
     });
 
@@ -183,7 +205,8 @@ const App: React.FC = () => {
         setEntries(mappedData);
       }
     } catch (e: any) {
-      console.warn("Sync Issue: Network interrupted. Using offline cache.", e.message);
+      console.warn("Sync Issue: Network interrupted. Retrying in background.", e.message);
+      // Exponential backoff or simple retry could go here
     } finally {
       setIsSyncing(false);
     }
@@ -192,7 +215,9 @@ const App: React.FC = () => {
   useEffect(() => {
     if (session) {
       fetchCloudData();
-      const channel = supabase.channel('realtime_production').on('postgres_changes', { event: '*', schema: 'public', table: 'production_entries' }, () => fetchCloudData()).subscribe();
+      const channel = supabase.channel('realtime_production')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'production_entries' }, () => fetchCloudData())
+        .subscribe();
       return () => { supabase.removeChannel(channel); };
     }
   }, [session]);
@@ -235,7 +260,7 @@ const App: React.FC = () => {
           user_email: session?.user?.email || 'unknown'
         };
 
-        if (newEntry.id && !isNaN(Number(newEntry.id))) {
+        if (newEntry.id && !isNaN(Number(newEntry.id)) && String(newEntry.id).length < 10) {
           entryData.id = Number(newEntry.id);
         }
         
@@ -333,10 +358,11 @@ const App: React.FC = () => {
         </div>
         
         <div className="text-center space-y-2">
-          <p className="text-sm font-bold tracking-[0.2em] uppercase opacity-70">Syncing Universal Terminal Identity...</p>
+          <p className="text-sm font-bold tracking-[0.2em] uppercase opacity-70">Synchronizing Universal Terminal Identity...</p>
+          <p className="text-xs text-slate-500 font-medium">Establishing secure connection to Supabase Cloud</p>
           {showRetry && (
             <p className="text-[10px] font-medium text-slate-500 uppercase tracking-widest animate-in fade-in duration-500">
-              Connection taking longer than expected
+              Connection taking longer than expected due to network latency
             </p>
           )}
         </div>
@@ -346,7 +372,7 @@ const App: React.FC = () => {
             onClick={forceInitialize}
             className="flex items-center gap-2 px-6 py-2.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-black uppercase tracking-widest rounded-full transition-all shadow-xl shadow-blue-500/20 animate-in slide-in-from-bottom-2"
           >
-            <RefreshCcw size={14} /> Force Start Terminal
+            <RefreshCcw size={14} /> Force Start Offline Mode
           </button>
         )}
       </div>
@@ -395,7 +421,10 @@ const App: React.FC = () => {
                 {currentRoleIdentity.label}
               </p>
             </div>
-            <button onClick={() => supabase.auth.signOut()} className="mt-4 w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-slate-700 hover:bg-rose-900 transition-all text-xs font-bold text-white shadow-sm">
+            <button onClick={() => {
+              localStorage.removeItem('protrack_cached_role');
+              supabase.auth.signOut();
+            }} className="mt-4 w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-slate-700 hover:bg-rose-900 transition-all text-xs font-bold text-white shadow-sm">
               <LogOut size={14} /> Termination Log
             </button>
           </div>
