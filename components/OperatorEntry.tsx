@@ -149,26 +149,32 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
   const [stage, setStage] = useState(activeStagesList[0]);
   const [activity, setActivity] = useState(activeStageMapping[activeStagesList[0]][0]);
   
+  // Initial default values for Stage and Activity
   useEffect(() => {
-    if (!activeInProgressEntry && activeStagesList.length > 0) {
-      const firstStage = activeStagesList[0];
-      setStage(firstStage);
-      setActivity(activeStageMapping[firstStage][0]);
+    if (activeStagesList.length > 0) {
+      if (!activeStagesList.includes(stage)) {
+        const firstStage = activeStagesList[0];
+        setStage(firstStage);
+        setActivity(activeStageMapping[firstStage][0]);
+      } else if (!activeStageMapping[stage]?.includes(activity)) {
+        setActivity(activeStageMapping[stage][0]);
+      }
     }
-  }, [activeStagesList, activeStageMapping, activeInProgressEntry]);
+  }, [activeStagesList, activeStageMapping]);
 
+  // isAlreadyLogged checks if a SN+Activity has a "Completed" status in the history
+  // It now ignores whether there's an In-Progress session for warning display purposes
   const isAlreadyLogged = useMemo(() => {
     const cleanSerial = serialNo.trim().toLowerCase();
     const cleanActivity = activity.trim().toLowerCase();
     if (!cleanSerial || !cleanActivity) return false;
-    if (activeInProgressEntry) return false;
     return entries.some(existing => 
       existing.serialNo.toLowerCase() === cleanSerial && 
       existing.activity.toLowerCase() === cleanActivity &&
       existing.status === 'Completed' &&
       !existing.isGap
     );
-  }, [entries, serialNo, activity, activeInProgressEntry]);
+  }, [entries, serialNo, activity]);
 
   const [soSqNo, setSoSqNo] = useState('');
   const [productionDate, setProductionDate] = useState(new Date().toISOString().split('T')[0]);
@@ -300,7 +306,7 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
           .from('production_entries')
           .select('*')
           .ilike('serial_no', cleanSerial)
-          .eq('stage', activity)
+          .eq('stage', activity) // Activity column in DB is 'stage'
           .eq('status', 'In Progress')
           .maybeSingle();
 
@@ -334,11 +340,15 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
             lossReason: '',
             notes: inProgress.notes || ''
           });
-          setStage(inProgress.station);
-          setProductLine(inProgress.product_line);
-          setModel(inProgress.model);
-          setUnitSrNo(inProgress.unit_sr_no || '');
-          setSoSqNo(inProgress.so_sq_no || '');
+          
+          // Preserving local scan data if DB record is empty
+          if (inProgress.unit_sr_no && inProgress.unit_sr_no.trim() !== '') {
+            setUnitSrNo(inProgress.unit_sr_no);
+          }
+          if (inProgress.so_sq_no && inProgress.so_sq_no.trim() !== '') {
+            setSoSqNo(inProgress.so_sq_no);
+          }
+          
           setProductionDate(inProgress.production_date);
           setStartTime(inProgress.start_time);
           const now = new Date();
@@ -346,6 +356,10 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
           setEndTime(now.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }));
         } else {
           setActiveInProgressEntry(null);
+          const now = new Date();
+          const timeStr = now.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+          setStartTime(timeStr);
+          setProductionDate(now.toISOString().split('T')[0]);
         }
 
         const { data, error } = await supabase
@@ -439,7 +453,7 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
         const totalCreditedMins = multiDaySplits.reduce((acc, s) => acc + s.minutes, 0);
         multiDaySplits.forEach(split => {
           const key = `${split.date}-${split.shift}`;
-          const input = assignmentInputs[key] || { operators: [], count: 0 };
+          const input = (assignmentInputs[key] as AssignmentInput) || { operators: [], count: 0, affectedParameter: '', defectCategory: '', issueDescription: '' };
           const ratio = split.minutes / totalCreditedMins;
           loss += ((variance * ratio) / 60) * Math.max(1, input.count);
         });
@@ -459,8 +473,6 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
 
   const handleScanResult = (text: string) => {
     const parts = text.split('|').map(p => p.trim());
-    
-    // Fulfilling requirement: Capture details ONLY. Do not look for activities immediately.
     setUserHasSelectedActivity(false);
 
     const findMatchingValue = (list: string[], scannedValue: string) => {
@@ -486,8 +498,6 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
     } else {
       setSerialNo(parts[0]);
     }
-    
-    // Activity search should be triggered by manual selection later.
   };
 
   const stopScanner = () => {
@@ -497,10 +507,12 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!serialNo || isFetchingLastLog || isAlreadyLogged) return;
+    // Block action if we are trying to start a completed activity
+    const isBlockingStart = !activeInProgressEntry && isAlreadyLogged;
+    if (!serialNo || isFetchingLastLog || isBlockingStart) return;
 
     if (activeInProgressEntry) {
-      const allZeroHeadcount = Object.values(assignmentInputs).every(inp => inp.count === 0);
+      const allZeroHeadcount = (Object.values(assignmentInputs) as AssignmentInput[]).every(inp => inp.count === 0);
       if (allZeroHeadcount) { alert("Resource Allocation required: Please select operators for the shifts worked."); return; }
     }
 
@@ -556,7 +568,7 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
       } else {
         multiDaySplits.forEach((split, idx) => {
           const key = `${split.date}-${split.shift}`;
-          const input = assignmentInputs[key];
+          const input = (assignmentInputs[key] as AssignmentInput);
           const allocatedLoss = (split.minutes / (totalActual || 1)) * lossHours;
           
           entriesToSave.push({
@@ -689,7 +701,7 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
                <label className="text-xs font-bold text-slate-500 uppercase flex items-center gap-2 ml-1">
                  <Layout size={14} className="text-blue-500" /> Select Stage
                </label>
-               <select value={stage} onChange={(e) => { const nextStage = e.target.value; setStage(nextStage); setActivity(activeStageMapping[nextStage][0]); setUserHasSelectedActivity(true); }} disabled={!!activeInProgressEntry} className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl text-sm font-bold text-[#002060]">
+               <select value={stage} onChange={(e) => { const nextStage = e.target.value; setStage(nextStage); setActivity(activeStageMapping[nextStage][0]); setUserHasSelectedActivity(true); }} className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl text-sm font-bold text-[#002060]">
                  {activeStagesList.map(s => <option key={s} value={s}>{s}</option>)}
                </select>
              </div>
@@ -697,7 +709,7 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
                <label className="text-xs font-bold text-slate-500 uppercase flex items-center gap-2 ml-1">
                  <Activity size={14} className="text-blue-500" /> Production Activity
                </label>
-               <select value={activity} onChange={(e) => { setActivity(e.target.value); setUserHasSelectedActivity(true); }} disabled={!!activeInProgressEntry} className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl text-sm font-bold text-[#002060]">
+               <select value={activity} onChange={(e) => { setActivity(e.target.value); setUserHasSelectedActivity(true); }} className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl text-sm font-bold text-[#002060]">
                  {(activeStageMapping[stage] || []).map(a => <option key={a} value={a}>{a}</option>)}
                </select>
              </div>
@@ -715,17 +727,17 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
             </div>
           </div>
 
-          {activeInProgressEntry && (
-            <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-6 flex items-start gap-4 animate-in fade-in duration-300">
-              <CheckCircle2 className="text-emerald-500 shrink-0 mt-0.5" size={24} />
-              <div><h4 className="text-sm font-black text-emerald-900 leading-tight mb-1">Unit In Progress</h4><p className="text-xs font-bold text-emerald-700/80 leading-relaxed">Active session found for {serialNo} at {activity}. Started at {activeInProgressEntry.startTime} on {activeInProgressEntry.productionDate}.</p></div>
-            </div>
-          )}
-
           {isAlreadyLogged && (
             <div className="bg-amber-50 border border-amber-200 rounded-2xl p-6 flex items-start gap-4 animate-in fade-in duration-300">
               <AlertCircle className="text-amber-500 shrink-0 mt-0.5" size={24} />
               <div><h4 className="text-sm font-black text-amber-900 leading-tight mb-1">Activity Already Logged</h4><p className="text-xs font-bold text-emerald-700/80 leading-relaxed">The activity "{activity}" is already marked as completed for unit {serialNo}.</p></div>
+            </div>
+          )}
+
+          {activeInProgressEntry && (
+            <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-6 flex items-start gap-4 animate-in fade-in duration-300">
+              <CheckCircle2 className="text-emerald-500 shrink-0 mt-0.5" size={24} />
+              <div><h4 className="text-sm font-black text-emerald-900 leading-tight mb-1">Unit In Progress</h4><p className="text-xs font-bold text-emerald-700/80 leading-relaxed">Active session found for {serialNo} at {activity}. Started at {activeInProgressEntry.startTime} on {activeInProgressEntry.productionDate}.</p></div>
             </div>
           )}
 
@@ -759,7 +771,7 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
               <div className="grid grid-cols-1 gap-6">
                 {multiDaySplits.map((split) => {
                   const key = `${split.date}-${split.shift}`;
-                  const input = assignmentInputs[key] || { operators: [], count: 0, affectedParameter: '', defectCategory: '', issueDescription: '' };
+                  const input = (assignmentInputs[key] as AssignmentInput) || { operators: [], count: 0, affectedParameter: '', defectCategory: '', issueDescription: '' };
                   const allocatedLoss = (split.minutes / (totalActual || 1)) * lossHours;
                   return (
                     <div key={key} className="bg-white border-2 border-emerald-100 rounded-[2.5rem] p-6 shadow-sm space-y-4">
@@ -886,7 +898,15 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
             </div>
           )}
 
-          <button type="submit" disabled={isSubmitting || isFetchingLastLog || isAlreadyLogged} className={`w-full py-5 rounded-[1.5rem] font-bold text-sm uppercase tracking-[0.1em] flex items-center justify-center gap-3 shadow-xl transition-all active:scale-[0.99] disabled:opacity-50 ${activeInProgressEntry ? 'bg-emerald-600 hover:bg-emerald-700 text-white' : 'bg-[#0f172a] hover:bg-slate-800 text-white'}`}>
+          <button 
+            type="submit" 
+            disabled={
+              isSubmitting || 
+              isFetchingLastLog || 
+              (!activeInProgressEntry && isAlreadyLogged) // Block Start if already completed
+            } 
+            className={`w-full py-5 rounded-[1.5rem] font-bold text-sm uppercase tracking-[0.1em] flex items-center justify-center gap-3 shadow-xl transition-all active:scale-[0.99] disabled:opacity-50 ${activeInProgressEntry ? 'bg-emerald-600 hover:bg-emerald-700 text-white' : 'bg-[#0f172a] hover:bg-slate-800 text-white'}`}
+          >
             {isSubmitting || isFetchingLastLog ? <Loader2 size={18} className="animate-spin" /> : activeInProgressEntry ? <CheckCircle2 size={18} /> : <Send size={18} />} 
             {activeInProgressEntry ? 'Commit Stage Data (Complete)' : 'Commence Activity (Start)'}
           </button>

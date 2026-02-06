@@ -1,5 +1,4 @@
-
-import React, { useMemo, useState, useEffect } from 'react';
+import React, { useMemo, useState, useEffect, useRef } from 'react';
 import { 
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer 
 } from 'recharts';
@@ -17,6 +16,7 @@ const Dashboard: React.FC<DashboardProps> = ({ entries, plant, userRole }) => {
   const [selectedSerial, setSelectedSerial] = useState<string | null>(null);
   const [selectedPlantFilter, setSelectedPlantFilter] = useState<string>('All');
   const [selectedModelFilter, setSelectedModelFilter] = useState<string>('All');
+  const hasSetDefaultModel = useRef(false);
 
   const isGlobal = userRole === 'admin' || userRole === 'management';
 
@@ -110,6 +110,15 @@ const Dashboard: React.FC<DashboardProps> = ({ entries, plant, userRole }) => {
     const list = Array.from(models).sort();
     return ['All', ...list];
   }, [entries, selectedPlantFilter]);
+
+  // Auto-select first model besides 'All' on initial data load
+  useEffect(() => {
+    if (!hasSetDefaultModel.current && availableModels.length > 1) {
+      // Skip index 0 ('All') and select the first actual model
+      setSelectedModelFilter(availableModels[1]);
+      hasSetDefaultModel.current = true;
+    }
+  }, [availableModels]);
 
   // Reset filters if context changes
   useEffect(() => {
@@ -344,14 +353,15 @@ const Dashboard: React.FC<DashboardProps> = ({ entries, plant, userRole }) => {
           <div className="relative overflow-x-auto pb-4 custom-scrollbar">
             <div className="flex items-start min-w-[2500px] gap-0 px-4">
               {pipelineActivities.map((act, idx) => {
+                // Fixed: Added explicit type casting for 'data' in filter and map to avoid 'unknown' type errors
                 const activeUnits = Object.entries(activePipelines)
-                  .filter(([_, data]) => {
+                  .filter(([_, data]: [string, any]) => {
                     const plantMatch = selectedPlantFilter === 'All' || data.plant === selectedPlantFilter;
                     const modelMatch = selectedModelFilter === 'All' || data.model === selectedModelFilter;
                     const activityMatch = data.activity.trim().toUpperCase() === act.trim().toUpperCase();
                     return plantMatch && modelMatch && activityMatch;
                   })
-                  .map(([sn, data]) => ({ sn, model: data.model, plant: data.plant }));
+                  .map(([sn, data]: [string, any]) => ({ sn, model: data.model, plant: data.plant }));
 
                 return (
                   <div key={act} className="flex-1 flex flex-col items-center">
