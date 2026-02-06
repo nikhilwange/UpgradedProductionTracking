@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { 
   Send, Users, CalendarDays, Tag, Hash, Box, Layout, Layers, Info, Clock3, 
   ChevronDown, RefreshCw, Loader2, ArrowRight, ListChecks, X, AlertCircle, FileText, Scan, CheckCircle2, Activity,
-  Filter
+  Filter, ShieldCheck
 } from 'lucide-react';
 import { PLANT_REGISTRY, getModelContext, MODELS_LIST, PRODUCT_LINES_LIST, SERIAL_NUMBERS_LIST, BREAK_TIMES, OPERATORS_BY_MODEL_LINE, LOSS_PARAMETER_MAPPING, HOLIDAYS_LIST } from '../constants';
 import { ProductionEntry } from '../types';
@@ -107,6 +107,7 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
   const [serialNo, setSerialNo] = useState('');
   const [unitSrNo, setUnitSrNo] = useState('');
   const [userHasSelectedActivity, setUserHasSelectedActivity] = useState(false);
+  const [showSuccessOverlay, setShowSuccessOverlay] = useState(false);
   
   const filteredModels = useMemo(() => {
     if (plant === 'AMBERNATH') {
@@ -602,6 +603,11 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
       }
 
       await onAddEntry(entriesToSave);
+      
+      // Trigger success confirmation pop-up
+      setShowSuccessOverlay(true);
+      setTimeout(() => setShowSuccessOverlay(false), 4000); // Auto-dismiss after 4 seconds
+
       if (!activeInProgressEntry || entriesToSave.some(e => e.status === 'Completed')) {
         setSerialNo(''); setUnitSrNo(''); setSoSqNo(''); setAssignmentInputs({}); 
         setIdleGapMinutes(0); setIdleAttribution({ affectedParameter: '', defectCategory: '', issueDescription: '' });
@@ -617,6 +623,27 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
 
   return (
     <div className="max-w-6xl mx-auto py-4">
+      {/* Success Confirmation Overlay */}
+      {showSuccessOverlay && (
+        <div className="fixed inset-0 z-[300] bg-slate-900/60 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-300">
+          <div className="bg-white rounded-[2.5rem] p-10 max-w-sm w-full shadow-2xl flex flex-col items-center text-center space-y-6 animate-in zoom-in-95 duration-300">
+            <div className="w-20 h-20 bg-emerald-100 rounded-full flex items-center justify-center text-emerald-600 shadow-inner">
+              <CheckCircle2 size={48} />
+            </div>
+            <div className="space-y-2">
+              <h3 className="text-2xl font-black text-slate-900 uppercase tracking-tight leading-none">Transmission Success</h3>
+              <p className="text-sm font-bold text-slate-500 leading-relaxed uppercase tracking-wider">The production record has been securely committed to the Enterprise MES.</p>
+            </div>
+            <button 
+              onClick={() => setShowSuccessOverlay(false)}
+              className="w-full py-4 bg-slate-900 text-white rounded-2xl font-black text-xs uppercase tracking-[0.2em] shadow-lg active:scale-95 transition-all flex items-center justify-center gap-2"
+            >
+              <ShieldCheck size={16} /> Acknowledge
+            </button>
+          </div>
+        </div>
+      )}
+
       {isScanning && (
         <div className="fixed inset-0 z-[200] bg-slate-900/80 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-white rounded-[2rem] p-8 w-full max-w-lg shadow-2xl space-y-6">
