@@ -2,7 +2,7 @@ import React, { useMemo, useState, useEffect, useRef } from 'react';
 import { 
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer 
 } from 'recharts';
-import { TrendingUp, Clock, AlertTriangle, Package, ChevronDown, Activity as ActivityIcon, FileText, Timer, Filter, Globe } from 'lucide-react';
+import { TrendingUp, Clock, AlertTriangle, Package, ChevronDown, Activity as ActivityIcon, FileText, Timer, Filter, Globe, Loader2 } from 'lucide-react';
 import { ProductionEntry } from '../types';
 import { ACTIVITIES_LIST, ACTIVITY_STANDARDS, PLANT_REGISTRY } from '../constants';
 
@@ -26,7 +26,7 @@ const Dashboard: React.FC<DashboardProps> = ({ entries, plant, userRole }) => {
   };
 
   const formatTimeDisplay = (time: string | undefined) => {
-    if (!time || time === 'N/A' || time === '—' || time.trim() === '') return '—';
+    if (!time || time === 'N/A' || time === '-' || time.trim() === '') return '-';
     const parts = time.split(':');
     if (parts.length >= 2) {
       return `${parts[0].padStart(2, '0')}:${parts[1].padStart(2, '0')}`;
@@ -58,6 +58,18 @@ const Dashboard: React.FC<DashboardProps> = ({ entries, plant, userRole }) => {
     return { uniqueUnits, totalManhours, avgVariance, totalLoss };
   }, [filteredEntries]);
 
+  // Helper to determine active activity for a set of entries
+  const getActiveActivityName = (unitEntries: ProductionEntry[]) => {
+    const activityStatus: Record<string, { hasStart: boolean; hasEnd: boolean }> = {};
+    unitEntries.forEach(e => {
+      if (e.isGap || e.activity === "Inter-Activity Idle Time") return;
+      if (!activityStatus[e.activity]) activityStatus[e.activity] = { hasStart: false, hasEnd: false };
+      if (e.status === 'In Progress') activityStatus[e.activity].hasStart = true;
+      if (e.status === 'Completed') activityStatus[e.activity].hasEnd = true;
+    });
+    return Object.keys(activityStatus).find(act => activityStatus[act].hasStart && !activityStatus[act].hasEnd);
+  };
+
   // Units list for the selector
   const unitsList = useMemo(() => {
     const units: Record<string, { 
@@ -67,6 +79,7 @@ const Dashboard: React.FC<DashboardProps> = ({ entries, plant, userRole }) => {
       completedActivities: number; 
       lastEntry: ProductionEntry;
       allEntries: ProductionEntry[];
+      activeActivity?: string;
     }> = {};
 
     entries.forEach(e => {
@@ -80,11 +93,16 @@ const Dashboard: React.FC<DashboardProps> = ({ entries, plant, userRole }) => {
           allEntries: [] 
         };
       }
-      units[e.serialNo].completedActivities += 1;
+      if (e.status === 'Completed' && !e.isGap) units[e.serialNo].completedActivities += 1;
       units[e.serialNo].allEntries.push(e);
       if (new Date(e.createdAt).getTime() > new Date(units[e.serialNo].lastEntry.createdAt).getTime()) {
         units[e.serialNo].lastEntry = e;
       }
+    });
+
+    // Post-process to find active activities
+    Object.values(units).forEach(u => {
+      u.activeActivity = getActiveActivityName(u.allEntries);
     });
 
     return Object.values(units).sort((a, b) => new Date(b.lastEntry.createdAt).getTime() - new Date(a.lastEntry.createdAt).getTime());
@@ -151,12 +169,12 @@ const Dashboard: React.FC<DashboardProps> = ({ entries, plant, userRole }) => {
     const prodEntries = [...selectedUnitDetail.allEntries]
       .filter(e => {
         const isIdle = e.activity === "Inter-Activity Idle Time";
-        const isPlaceholder = e.status === 'In Progress' && e.manpower === 0;
-        return !isIdle && !isPlaceholder;
+        // Show all activity entries, including 'In Progress' placeholders to see them in timeline
+        return !isIdle;
       })
       .sort((a, b) => {
-        const timeA = new Date(`${a.productionDate}T${a.startTime}`).getTime();
-        const timeB = new Date(`${b.productionDate}T${b.startTime}`).getTime();
+        const timeA = new Date(a.createdAt).getTime();
+        const timeB = new Date(b.createdAt).getTime();
         return timeA - timeB;
       });
 
@@ -168,8 +186,8 @@ const Dashboard: React.FC<DashboardProps> = ({ entries, plant, userRole }) => {
 
     const consolidated = Object.entries(groups).map(([activityName, shifts]) => {
       const sortedShifts = [...shifts].sort((a, b) => {
-        const tA = new Date(`${a.productionDate}T${a.startTime}`).getTime();
-        const tB = new Date(`${b.productionDate}T${b.startTime}`).getTime();
+        const tA = new Date(a.createdAt).getTime();
+        const tB = new Date(b.createdAt).getTime();
         return tA - tB;
       });
       
@@ -177,7 +195,9 @@ const Dashboard: React.FC<DashboardProps> = ({ entries, plant, userRole }) => {
       const last = sortedShifts[sortedShifts.length - 1];
       
       const startMs = new Date(`${first.productionDate}T${first.startTime}`).getTime();
-      const endMs = new Date(`${last.endDate || last.productionDate}T${last.endTime}`).getTime();
+      const endMs = last.status === 'Completed' 
+        ? new Date(`${last.endDate || last.productionDate}T${last.endTime}`).getTime()
+        : Date.now(); // If not completed, end is 'now' for duration calculation if needed
 
       return {
         activityName,
@@ -185,7 +205,7 @@ const Dashboard: React.FC<DashboardProps> = ({ entries, plant, userRole }) => {
         startMs,
         endMs,
         startTime: first.startTime,
-        endTime: last.endTime,
+        endTime: last.status === 'Completed' ? last.endTime : '-',
         date: first.productionDate,
         isParallel: false
       };
@@ -198,7 +218,8 @@ const Dashboard: React.FC<DashboardProps> = ({ entries, plant, userRole }) => {
     let lastTimeStr = '';
 
     consolidated.forEach((group, idx) => {
-      if (idx > 0 && group.startMs > absoluteLatestEndMs) {
+      // Check for gaps (Inter-Activity Idle Time)
+      if (idx > 0 && group.startMs > absoluteLatestEndMs && absoluteLatestEndMs !== -Infinity) {
         const gapMins = (group.startMs - absoluteLatestEndMs) / 60000;
         if (gapMins >= 1) {
           nodes.push({
@@ -236,7 +257,7 @@ const Dashboard: React.FC<DashboardProps> = ({ entries, plant, userRole }) => {
   const benchmarkData = useMemo(() => {
     const activityData: Record<string, { standard: number; actualTotal: number; count: number }> = {};
     filteredEntries.forEach(e => {
-      if (e.status === 'In Progress' && e.manpower === 0) return;
+      if (e.status === 'In Progress') return; // Only benchmark completed activities
       
       if (!activityData[e.activity]) {
         activityData[e.activity] = { standard: ACTIVITY_STANDARDS[e.activity] || 0, actualTotal: 0, count: 0 };
@@ -245,7 +266,7 @@ const Dashboard: React.FC<DashboardProps> = ({ entries, plant, userRole }) => {
       activityData[e.activity].count += 1;
     });
     return Object.entries(activityData)
-      .map(([name, data]) => ({ name, Standard: data.standard, Actual: Math.round(data.actualTotal / data.count) }))
+      .map(([name, data]) => ({ name, Standard: data.standard, Actual: Math.round(data.actualTotal / (data.count || 1)) }))
       .slice(0, 5);
   }, [filteredEntries]);
 
@@ -260,13 +281,39 @@ const Dashboard: React.FC<DashboardProps> = ({ entries, plant, userRole }) => {
   }, [filteredEntries]);
 
   const activePipelines = useMemo(() => {
-    const lastSeen: Record<string, { activity: string; model: string; plant: string }> = {};
-    const validEntries = (entries || []).filter(e => !e.isGap && e.activity !== "Inter-Activity Idle Time");
+    const results: Record<string, { activity: string; model: string; plant: string; isInProgress: boolean }> = {};
     
-    [...validEntries].sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()).forEach(e => {
-      lastSeen[e.serialNo] = { activity: e.activity, model: e.model, plant: e.plant };
+    // Group entries by unit
+    const unitEntriesMap: Record<string, ProductionEntry[]> = {};
+    (entries || []).forEach(e => {
+      if (e.isGap || e.activity === "Inter-Activity Idle Time") return;
+      if (!unitEntriesMap[e.serialNo]) unitEntriesMap[e.serialNo] = [];
+      unitEntriesMap[e.serialNo].push(e);
     });
-    return lastSeen;
+
+    Object.entries(unitEntriesMap).forEach(([sn, unitEntries]) => {
+      const activeAct = getActiveActivityName(unitEntries);
+      const sorted = [...unitEntries].sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+      const last = sorted[sorted.length - 1];
+
+      if (activeAct) {
+        results[sn] = {
+          activity: activeAct,
+          model: last.model,
+          plant: last.plant,
+          isInProgress: true
+        };
+      } else {
+        results[sn] = {
+          activity: last.activity,
+          model: last.model,
+          plant: last.plant,
+          isInProgress: false
+        };
+      }
+    });
+
+    return results;
   }, [entries]);
 
   if (!entries.length) {
@@ -353,7 +400,6 @@ const Dashboard: React.FC<DashboardProps> = ({ entries, plant, userRole }) => {
           <div className="relative overflow-x-auto pb-4 custom-scrollbar">
             <div className="flex items-start min-w-[2500px] gap-0 px-4">
               {pipelineActivities.map((act, idx) => {
-                // Fixed: Added explicit type casting for 'data' in filter and map to avoid 'unknown' type errors
                 const activeUnits = Object.entries(activePipelines)
                   .filter(([_, data]: [string, any]) => {
                     const plantMatch = selectedPlantFilter === 'All' || data.plant === selectedPlantFilter;
@@ -361,7 +407,7 @@ const Dashboard: React.FC<DashboardProps> = ({ entries, plant, userRole }) => {
                     const activityMatch = data.activity.trim().toUpperCase() === act.trim().toUpperCase();
                     return plantMatch && modelMatch && activityMatch;
                   })
-                  .map(([sn, data]: [string, any]) => ({ sn, model: data.model, plant: data.plant }));
+                  .map(([sn, data]: [string, any]) => ({ sn, model: data.model, plant: data.plant, isInProgress: data.isInProgress }));
 
                 return (
                   <div key={act} className="flex-1 flex flex-col items-center">
@@ -376,9 +422,16 @@ const Dashboard: React.FC<DashboardProps> = ({ entries, plant, userRole }) => {
                           <button 
                             key={unit.sn} 
                             onClick={() => setSelectedSerial(unit.sn)} 
-                            className="px-2.5 py-1.5 bg-blue-50 border border-blue-200 rounded-lg text-[10px] font-bold text-blue-700 whitespace-nowrap hover:bg-blue-100 transition-all flex flex-col items-center shadow-sm"
+                            className={`px-2.5 py-1.5 border rounded-lg text-[10px] font-bold whitespace-nowrap transition-all flex flex-col items-center shadow-sm relative ${
+                              unit.isInProgress 
+                                ? 'bg-amber-50 border-amber-200 text-amber-700 animate-pulse ring-2 ring-amber-100 ring-offset-1' 
+                                : 'bg-blue-50 border-blue-200 text-blue-700 hover:bg-blue-100'
+                            }`}
                           >
                             <span>{unit.sn}</span>
+                            {unit.isInProgress && (
+                              <span className="text-[7px] font-black uppercase absolute -top-2 -right-1 bg-amber-500 text-white px-1.5 rounded">LIVE</span>
+                            )}
                           </button>
                         ))}
                       </div>
@@ -398,14 +451,16 @@ const Dashboard: React.FC<DashboardProps> = ({ entries, plant, userRole }) => {
               <p className="text-[10px] font-black text-blue-600 uppercase tracking-widest">
                 Unit Selection • {filteredUnitsList.length} Records Found
               </p>
-              <div className="relative w-full md:w-80">
+              <div className="relative w-full md:w-96">
                 <select 
                   value={selectedSerial || ''} 
                   onChange={(e) => setSelectedSerial(e.target.value)}
                   className="w-full pl-6 pr-10 py-3 bg-white border border-slate-200 rounded-2xl outline-none text-sm font-black text-slate-900 appearance-none focus:border-blue-500 transition-all shadow-sm"
                 >
                   {filteredUnitsList.map(u => (
-                    <option key={u.serialNo} value={u.serialNo}>{u.plant} — {u.model} — {u.serialNo}</option>
+                    <option key={u.serialNo} value={u.serialNo}>
+                      {u.plant} — {u.model} — {u.serialNo} {u.activeActivity ? `(In Progress: ${u.activeActivity})` : ''}
+                    </option>
                   ))}
                 </select>
                 <ChevronDown size={18} className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
@@ -413,7 +468,7 @@ const Dashboard: React.FC<DashboardProps> = ({ entries, plant, userRole }) => {
             </div>
 
             <div className="flex flex-col items-end gap-2">
-              <span className="px-4 py-1.5 bg-blue-100 text-blue-700 rounded-lg text-[10px] font-black tracking-widest uppercase">
+              <span className={`px-4 py-1.5 rounded-lg text-[10px] font-black tracking-widest uppercase ${overallProgress >= 100 ? 'bg-green-100 text-green-700' : 'bg-blue-100 text-blue-700'}`}>
                 {overallProgress >= 100 ? 'Completed' : 'In Progress'}
               </span>
               <div className="w-48 space-y-1.5">
@@ -469,7 +524,8 @@ const Dashboard: React.FC<DashboardProps> = ({ entries, plant, userRole }) => {
             }
 
             const group = node;
-            const isCompleted = group.shifts.every((s: ProductionEntry) => s.status === 'Completed');
+            const isCompleted = group.shifts.some((s: ProductionEntry) => s.status === 'Completed');
+            const isInProgressOnly = !isCompleted && group.shifts.some((s: ProductionEntry) => s.status === 'In Progress');
             const lossReasons = [...new Set(group.shifts.map((s: ProductionEntry) => s.lossReason).filter((r: string) => r && r !== 'Standard Operation'))];
 
             return (
@@ -484,48 +540,99 @@ const Dashboard: React.FC<DashboardProps> = ({ entries, plant, userRole }) => {
                   isCompleted ? 'border-slate-100 shadow-sm opacity-90' : 'border-blue-200 shadow-lg ring-4 ring-blue-50'
                 } hover:border-blue-200 relative overflow-hidden`}>
                   
-                  <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
-                    <div className="flex-1 space-y-4">
-                      <div className="space-y-1">
-                        <span className="text-[10px] font-black text-blue-400 uppercase tracking-widest block ml-1">DATE: {formatDate(group.date)}</span>
-                        <div className="flex flex-wrap items-baseline gap-4">
-                          <h4 className="text-xl font-black text-slate-900 tracking-tight leading-none">{toTitleCase(group.activityName)}</h4>
-                          {lossReasons.length > 0 && (
-                            <div className="flex items-center gap-1.5 px-3 py-1 bg-amber-50 text-amber-700 border border-amber-100 rounded-full text-[10px] font-black uppercase leading-none">
-                              <AlertTriangle size={12} /> LOSS: {lossReasons.join(', ').toUpperCase()}
-                            </div>
-                          )}
-                        </div>
-                      </div>
+                  {group.isParallel && (
+                    <div className="absolute top-0 right-0 bg-blue-600 text-white px-6 py-2 rounded-bl-3xl text-[11px] font-black uppercase tracking-widest shadow-lg z-20">
+                      PARALLEL ACTIVITY
+                    </div>
+                  )}
 
-                      <div className="space-y-4">
-                        {group.shifts.map((entry: ProductionEntry, shiftIdx: number) => (
-                          <div key={entry.id} className={`flex items-center gap-4 ${shiftIdx > 0 ? 'pt-4 border-t border-slate-50' : ''}`}>
-                            <div className="flex-1 grid grid-cols-2 md:grid-cols-4 gap-3">
-                              <MetricBox label="Manpower" value={`${entry.manpower} Oper`} />
-                              <MetricBox label="Planned MH" value={`${((entry.standardCycleTime / 60) * entry.manpower).toFixed(1)}h`} />
-                              <MetricBox label="Actual MH" value={`${(entry.manhoursEngaged || 0).toFixed(1)}h`} />
-                              <MetricBox label="Efficiency" value={`${Math.round((entry.standardCycleTime / (entry.actualCycleTime || 1)) * 100)}%`} />
-                            </div>
+                  {isInProgressOnly && (
+                    <div className="absolute top-0 right-0 p-4">
+                       <div className="flex items-center gap-2 bg-amber-100/80 text-amber-700 px-4 py-1.5 rounded-full text-[10px] font-black uppercase animate-pulse shadow-sm border border-amber-200/50 backdrop-blur-[2px]">
+                         <Timer size={12} /> SESSION ACTIVE
+                       </div>
+                    </div>
+                  )}
+
+                  <div className="flex flex-col gap-2">
+                    {/* Activity Header Row - Compact spacing applied */}
+                    <div className="flex flex-col lg:flex-row justify-between gap-4">
+                      <div className="flex-1 space-y-1">
+                        <span className="text-[10px] font-black text-blue-400 uppercase tracking-widest block ml-1">DATE: {formatDate(group.date)}</span>
+                        <div className="flex items-center gap-3">
+                          <h4 className="text-xl font-black text-slate-900 tracking-tight leading-none">{toTitleCase(group.activityName)}</h4>
+                          <span className="text-sm font-bold text-slate-400">Activity cycle: {ACTIVITY_STANDARDS[group.activityName] || 0} min</span>
+                        </div>
+                        {lossReasons.length > 0 && (
+                          <div className="mt-2 flex items-center gap-1.5 px-3 py-1 bg-amber-50 text-amber-700 border border-amber-100 rounded-full text-[10px] font-black uppercase leading-none w-fit">
+                            <AlertTriangle size={12} /> LOSS: {lossReasons.join(', ').toUpperCase()}
                           </div>
-                        ))}
+                        )}
+                      </div>
+                      <div className="lg:w-64 lg:pl-8 lg:border-l border-slate-100 flex items-center">
+                        {/* Structural alignment partition */}
                       </div>
                     </div>
 
-                    <div className="lg:w-64 border-t lg:border-t-0 lg:border-l border-slate-100 pt-6 lg:pt-0 lg:pl-8 flex flex-col gap-5">
-                      <div className="flex items-center gap-2 text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">
-                        <Clock size={14} /> Timeline Overview
-                      </div>
-                      <div className="space-y-3">
-                        <div className="flex items-center justify-between">
-                          <span className="text-[11px] font-bold text-slate-400">Actual (Start)</span>
-                          <span className="bg-slate-50 px-3 py-1 rounded-lg text-xs font-black mono text-slate-900">{formatTimeDisplay(group.startTime)}</span>
+                    {/* Unified Shift Rows */}
+                    <div className="space-y-4 mt-2">
+                      {group.shifts
+                        .filter(e => {
+                          if (isCompleted && e.status === 'In Progress') return false;
+                          return e.manpower > 0 || e.status === 'In Progress';
+                        })
+                        .map((entry: ProductionEntry, shiftIdx: number) => (
+                        <div key={entry.id} className={`flex flex-col gap-3 ${shiftIdx > 0 ? 'pt-6 border-t border-slate-100 border-dashed' : ''}`}>
+                          {/* Shift Header Area (Green Box Alignment) */}
+                          <div className="flex flex-col lg:flex-row gap-6 items-center">
+                            {/* Left Partition: Shift Label */}
+                            <div className="flex-1">
+                              <span className={`px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-widest border ${
+                                entry.shift === 'Shift 2' ? 'bg-amber-50 text-amber-600 border-amber-100' : 'bg-blue-50 text-blue-600 border-blue-100'
+                              }`}>
+                                {entry.shift}
+                              </span>
+                            </div>
+
+                            {/* Right Partition: Timeline Header */}
+                            <div className="lg:w-64 lg:pl-8 lg:border-l border-slate-100/0 lg:border-slate-100">
+                              {shiftIdx === 0 && (
+                                <div className="flex items-center justify-between">
+                                  <div className="flex items-center gap-2 text-[11px] font-black text-slate-400 uppercase tracking-[0.2em]">
+                                    <Clock size={16} /> TIMELINE OVERVIEW
+                                  </div>
+                                  {entry.status === 'In Progress' && (
+                                    <span className="text-[8px] font-black bg-amber-100 text-amber-600 px-1.5 rounded animate-pulse">LIVE</span>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Shift Content Area (Pink Box Alignment) */}
+                          <div className="flex flex-col lg:flex-row gap-6">
+                            {/* Left Partition: Metric Boxes */}
+                            <div className="flex-1 grid grid-cols-2 md:grid-cols-4 gap-3">
+                              <MetricBox label="MANPOWER" value={entry.status === 'In Progress' && entry.manpower === 0 ? 'Awaiting' : (entry.manpower > 0 ? `${entry.manpower} Oper` : 'Awaiting')} />
+                              <MetricBox label="PLANNED MH" value={`${((ACTIVITY_STANDARDS[entry.activity] || 0) / 60 * Math.max(1, entry.manpower)).toFixed(1)} hrs`} />
+                              <MetricBox label="CURR MH" value={entry.status === 'Completed' ? `${(entry.manhoursEngaged || 0).toFixed(1)} hrs` : 'Calculated at end'} />
+                              <MetricBox label="EFFICIENCY" value={entry.status === 'Completed' ? `${Math.round((entry.standardCycleTime / (entry.actualCycleTime || 1)) * 100)}%` : 'TBD'} />
+                            </div>
+
+                            {/* Right Partition: Timing Values */}
+                            <div className="lg:w-64 lg:pl-8 lg:border-l border-slate-100 flex flex-col justify-center gap-2">
+                              <div className="flex items-center justify-between gap-4">
+                                <span className="text-[11px] font-black text-slate-400 uppercase">Actual (Start)</span>
+                                <span className="bg-slate-50 px-3 py-1 rounded-lg text-xs font-black mono text-slate-900 border border-slate-100">{formatTimeDisplay(entry.startTime)}</span>
+                              </div>
+                              <div className="flex items-center justify-between gap-4">
+                                <span className="text-[11px] font-black text-slate-400 uppercase">Actual (End)</span>
+                                <span className="bg-slate-50 px-3 py-1 rounded-lg text-xs font-black mono text-slate-900 border border-slate-100">{formatTimeDisplay(entry.status === 'Completed' ? entry.endTime : '-')}</span>
+                              </div>
+                            </div>
+                          </div>
                         </div>
-                        <div className="flex items-center justify-between">
-                          <span className="text-[11px] font-bold text-slate-400">Actual (End)</span>
-                          <span className="bg-slate-50 px-3 py-1 rounded-lg text-xs font-black mono text-slate-900">{formatTimeDisplay(group.endTime)}</span>
-                        </div>
-                      </div>
+                      ))}
                     </div>
                   </div>
                 </div>
@@ -601,8 +708,8 @@ const MetricBox: React.FC<{ label: string; value: string; theme?: 'default' | 'p
   };
   const colors = getThemeClasses();
   return (
-    <div className={`${colors.bg} p-4 rounded-2xl border ${colors.border} flex flex-col items-center justify-center text-center`}>
-      <span className={`text-[10px] font-bold ${colors.label} mb-1 uppercase tracking-widest`}>{label}</span>
+    <div className={`${colors.bg} p-4 rounded-2xl border ${colors.border} flex flex-col items-center justify-center text-center transition-all hover:bg-white hover:shadow-sm`}>
+      <span className={`text-[10px] font-black ${colors.label} mb-1 uppercase tracking-widest`}>{label}</span>
       <span className={`text-sm font-black ${colors.value}`}>{value}</span>
     </div>
   );
