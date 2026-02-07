@@ -164,7 +164,6 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
   }, [activeStagesList, activeStageMapping]);
 
   // isAlreadyLogged checks if a SN+Activity has a "Completed" status in the history
-  // It now ignores whether there's an In-Progress session for warning display purposes
   const isAlreadyLogged = useMemo(() => {
     const cleanSerial = serialNo.trim().toLowerCase();
     const cleanActivity = activity.trim().toLowerCase();
@@ -227,36 +226,45 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
     if (isNaN(startMs) || isNaN(endMs) || endMs <= startMs) return 0;
     
     let totalAvailable = 0;
-    const startDateStr = new Date(startMs).toISOString().split('T')[0];
-    const endDateStr = new Date(endMs).toISOString().split('T')[0];
-    const d = new Date(startDateStr);
-    const endD = new Date(endDateStr);
+    const d = new Date(startMs);
+    d.setHours(0, 0, 0, 0); // Start boundary of the first day
     
-    while (d <= endD) {
-      const dateStr = d.toISOString().split('T')[0];
+    const endBoundary = new Date(endMs);
+    endBoundary.setHours(23, 59, 59, 999);
+    
+    while (d <= endBoundary) {
+      // Use toLocaleDateString('en-CA') for ISO formatted YYYY-MM-DD in local time
+      const dateStr = d.toLocaleDateString('en-CA');
+      
       if (!HOLIDAYS_LIST.includes(dateStr)) {
         const dayStartMs = new Date(`${dateStr}T00:00:00`).getTime();
         const relStart = Math.max(0, (startMs - dayStartMs) / 60000);
         const relEnd = Math.min(1440, (endMs - dayStartMs) / 60000);
-        const s = Math.max(relStart, S1_START);
+        
+        // INTER-ACTIVITY LOSS SHOULD NOT CONSIDER BREAKS AND NON-WORKING HOURS
+        // Clip to standard shift operational window (07:00 to 23:30)
+        const s = Math.max(relStart, S1_START); 
         const e = Math.min(relEnd, S2_END);
+        
         if (s < e) {
           let dailyWorkingMins = e - s;
           let dailyBreakMins = 0;
+          
           BREAK_TIMES.forEach(b => {
-            if (b.name === 'Non Working Hours') return;
+            if (b.name === 'Non Working Hours') return; // Handled by S1_START/S2_END clipping
             const bs = toMins(b.start);
             const be = toMins(b.end);
             const os = Math.max(s, bs);
             const oe = Math.min(e, be);
             if (os < oe) dailyBreakMins += (oe - os);
           });
+          
           totalAvailable += (dailyWorkingMins - dailyBreakMins);
         }
       }
       d.setDate(d.getDate() + 1);
     }
-    return totalAvailable;
+    return Math.max(0, totalAvailable);
   };
 
   const calculatePredictedFinish = (startStr: string, sctMins: number) => {
@@ -342,7 +350,6 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
             notes: inProgress.notes || ''
           });
           
-          // Preserving local scan data if DB record is empty
           if (inProgress.unit_sr_no && inProgress.unit_sr_no.trim() !== '') {
             setUnitSrNo(inProgress.unit_sr_no);
           }
@@ -418,7 +425,7 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
     const endD = new Date(endDate);
     
     while (d <= endD) {
-      const dateStr = d.toISOString().split('T')[0];
+      const dateStr = d.toLocaleDateString('en-CA');
       if (HOLIDAYS_LIST.includes(dateStr)) { d.setDate(d.getDate() + 1); continue; }
       const dayStart = new Date(`${dateStr}T00:00:00`).getTime();
       const relStart = Math.max(0, (startMs - dayStart) / 60000);
@@ -508,7 +515,6 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    // Block action if we are trying to start a completed activity
     const isBlockingStart = !activeInProgressEntry && isAlreadyLogged;
     if (!serialNo || isFetchingLastLog || isBlockingStart) return;
 
@@ -603,10 +609,8 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
       }
 
       await onAddEntry(entriesToSave);
-      
-      // Trigger success confirmation pop-up
       setShowSuccessOverlay(true);
-      setTimeout(() => setShowSuccessOverlay(false), 4000); // Auto-dismiss after 4 seconds
+      setTimeout(() => setShowSuccessOverlay(false), 4000);
 
       if (!activeInProgressEntry || entriesToSave.some(e => e.status === 'Completed')) {
         setSerialNo(''); setUnitSrNo(''); setSoSqNo(''); setAssignmentInputs({}); 
@@ -623,7 +627,6 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
 
   return (
     <div className="max-w-6xl mx-auto py-4">
-      {/* Success Confirmation Overlay */}
       {showSuccessOverlay && (
         <div className="fixed inset-0 z-[300] bg-slate-900/60 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-300">
           <div className="bg-white rounded-[2.5rem] p-10 max-w-sm w-full shadow-2xl flex flex-col items-center text-center space-y-6 animate-in zoom-in-95 duration-300">
@@ -930,7 +933,7 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
             disabled={
               isSubmitting || 
               isFetchingLastLog || 
-              (!activeInProgressEntry && isAlreadyLogged) // Block Start if already completed
+              (!activeInProgressEntry && isAlreadyLogged) 
             } 
             className={`w-full py-5 rounded-[1.5rem] font-bold text-sm uppercase tracking-[0.1em] flex items-center justify-center gap-3 shadow-xl transition-all active:scale-[0.99] disabled:opacity-50 ${activeInProgressEntry ? 'bg-emerald-600 hover:bg-emerald-700 text-white' : 'bg-[#0f172a] hover:bg-slate-800 text-white'}`}
           >

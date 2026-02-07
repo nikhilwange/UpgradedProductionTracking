@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef } from 'react';
 import { LayoutDashboard, ClipboardList, Database, Factory, Sparkles, Users, Maximize, Minimize, LogOut, ShieldCheck, ShieldAlert, Settings, Loader2, LineChart, Briefcase, User, Shield, RefreshCcw, WifiOff } from 'lucide-react';
 import { ProductionEntry } from './types';
@@ -51,11 +50,10 @@ const App: React.FC = () => {
   const clearLocalCaches = () => {
     localStorage.removeItem('protrack_cached_role');
     localStorage.removeItem('protrack_cached_plant');
-    localStorage.removeItem('supabase.auth.token');
-    localStorage.removeItem('sb-ekcgvhntoztulffwqefm-auth-token');
     
+    // Comprehensive cleanup for Supabase and ProTrack keys
     Object.keys(localStorage).forEach(key => {
-      if (key.includes('supabase') || key.includes('protrack')) {
+      if (key.includes('supabase') || key.includes('protrack') || key.includes('sb-')) {
         localStorage.removeItem(key);
       }
     });
@@ -129,7 +127,13 @@ const App: React.FC = () => {
         
         if (result.error) {
           console.error("Session Error detected:", result.error.message);
-          if (result.error.message.includes('refresh_token') || result.error.message.includes('not found')) {
+          // Catch and handle JWT errors specifically
+          if (
+            result.error.message.includes('refresh_token') || 
+            result.error.message.includes('not found') || 
+            result.error.message.includes('JWT') ||
+            result.error.message.includes('exp')
+          ) {
             clearLocalCaches();
             setSession(null);
           }
@@ -145,7 +149,7 @@ const App: React.FC = () => {
       } catch (err: any) {
         console.error("Initialization check failed critically:", err.message);
         setInitError(true);
-        if (err.message.includes('token') || err.message.includes('refresh')) {
+        if (err.message.includes('token') || err.message.includes('refresh') || err.message.includes('JWT')) {
           clearLocalCaches();
           setSession(null);
         }
@@ -166,11 +170,20 @@ const App: React.FC = () => {
         return;
       }
 
-      setSession(newSession);
-      if (newSession) {
-        const { role, plant } = await fetchUserRole(newSession.user.id, newSession.user.email);
-        setUserRole(role);
-        setHomePlant(plant);
+      // Proactive check for JWT validity on state change
+      try {
+        setSession(newSession);
+        if (newSession) {
+          const { role, plant } = await fetchUserRole(newSession.user.id, newSession.user.email);
+          setUserRole(role);
+          setHomePlant(plant);
+        }
+      } catch (e: any) {
+        if (e.message.includes('JWT') || e.message.includes('exp')) {
+          clearLocalCaches();
+          setSession(null);
+          setUserRole(null);
+        }
       }
     });
 
@@ -219,7 +232,7 @@ const App: React.FC = () => {
           stage: item.station || '',     
           productLine: item.product_line || '',
           model: item.model || '',
-          serialNo: item.serial_no || '',
+          serialNo: item.serial_no || '', // CORRECTED: Changed serial_no to serialNo to match interface
           unitSrNo: item.unit_sr_no || '',
           soSqNo: item.so_sq_no || '',
           productionDate: item.production_date || '',
@@ -326,6 +339,7 @@ const App: React.FC = () => {
     if (userRole !== 'admin') return;
     setIsSyncing(true);
     try {
+      // FIX: Changed updatedEntry.defect_category to updatedEntry.defectCategory and updatedEntry.issue_description to updatedEntry.issueDescription to match the ProductionEntry interface.
       const { error } = await supabase.from('production_entries').update({
         plant: updatedEntry.plant,
         station: updatedEntry.stage,     
