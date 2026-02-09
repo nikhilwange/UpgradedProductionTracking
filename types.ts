@@ -1,4 +1,3 @@
-
 export interface ShiftAssignment {
   date: string;
   shift: 'Shift 1' | 'Shift 2' | 'Shift 3';
@@ -13,12 +12,12 @@ export interface ShiftAssignment {
 
 export interface ProductionEntry {
   id: string;
-  plant: string; // New field for multi-plant tracking
+  plant: string; 
   stage: string;      
   productLine: string;
   model: string;     
   serialNo: string;  
-  unitSrNo: string; // New industrial field
+  unitSrNo: string; 
   soSqNo: string;    
   productionDate: string;      
   endDate?: string;  
@@ -45,6 +44,11 @@ export interface ProductionEntry {
   createdAt: string; 
   userEmail?: string;
   isGap?: boolean; 
+  // Snake case aliases for database compatibility
+  serial_no?: string;
+  unit_sr_no?: string;
+  product_line?: string;
+  so_sq_no?: string;
 }
 
 export interface ActivityStandard {

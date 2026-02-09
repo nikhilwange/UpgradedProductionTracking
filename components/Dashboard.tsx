@@ -1,3 +1,4 @@
+
 import React, { useMemo, useState, useEffect, useRef } from 'react';
 import { 
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer 
@@ -257,7 +258,8 @@ const Dashboard: React.FC<DashboardProps> = ({ entries, plant, userRole }) => {
   const benchmarkData = useMemo(() => {
     const activityData: Record<string, { standard: number; actualTotal: number; count: number }> = {};
     filteredEntries.forEach(e => {
-      if (e.status === 'In Progress') return; // Only benchmark completed activities
+      // Exclude In Progress entries and Gap/Idle entries from the performance benchmark
+      if (e.status === 'In Progress' || e.isGap || e.activity === "Inter-Activity Idle Time") return;
       
       if (!activityData[e.activity]) {
         activityData[e.activity] = { standard: ACTIVITY_STANDARDS[e.activity] || 0, actualTotal: 0, count: 0 };
@@ -273,6 +275,8 @@ const Dashboard: React.FC<DashboardProps> = ({ entries, plant, userRole }) => {
   const bottleneckData = useMemo(() => {
     const losses: Record<string, number> = {};
     filteredEntries.forEach(e => {
+      // Exclude Gap/Idle entries from the bottleneck analysis to focus only on production activities
+      if (e.isGap || e.activity === "Inter-Activity Idle Time") return;
       losses[e.activity] = (losses[e.activity] || 0) + e.lossHours;
     });
     return Object.entries(losses)

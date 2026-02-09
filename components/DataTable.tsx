@@ -1,6 +1,5 @@
-
 import React, { useState, useMemo } from 'react';
-import { Trash2, Download, Search as SearchIcon, Table as TableIcon, UserCheck, Calendar as CalendarIcon, ArrowRight, Activity as ActivityIcon, Clock } from 'lucide-react';
+import { Trash2, Download, Search as SearchIcon, Table as TableIcon, UserCheck, Calendar as CalendarIcon, ArrowRight, Activity as ActivityIcon, Clock, Filter, X, ChevronDown, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
 import { ProductionEntry } from '../types';
 
 interface DataTableProps {
@@ -9,12 +8,38 @@ interface DataTableProps {
   isAdmin: boolean;
 }
 
+interface ColumnFilters {
+  plant: string;
+  stage: string;
+  model: string;
+  serialNo: string;
+  activity: string;
+  status: string;
+  parameter: string;
+}
+
+interface SortConfig {
+  key: string;
+  direction: 'asc' | 'desc';
+}
+
 const DataTable: React.FC<DataTableProps> = ({ entries, onDelete, isAdmin }) => {
   const today = new Date().toISOString().split('T')[0];
   const [viewMode, setViewMode] = useState<'records' | 'manpower'>('records');
   const [searchQuery, setSearchQuery] = useState('');
   const [startDate, setStartDate] = useState(today);
   const [endDate, setEndDate] = useState(today);
+  const [sortConfig, setSortConfig] = useState<SortConfig | null>(null);
+  
+  const [columnFilters, setColumnFilters] = useState<ColumnFilters>({
+    plant: '',
+    stage: '',
+    model: '',
+    serialNo: '',
+    activity: '',
+    status: '',
+    parameter: ''
+  });
 
   const SHIFT_CAPACITY_HOURS = 7.5; 
 
@@ -100,8 +125,30 @@ const DataTable: React.FC<DataTableProps> = ({ entries, onDelete, isAdmin }) => 
     return rows;
   }, [entries]);
 
+  const filterOptions = useMemo(() => {
+    const options = {
+      plant: new Set<string>(),
+      stage: new Set<string>(),
+      status: new Set<string>(),
+      parameter: new Set<string>(),
+    };
+    flattenedRecords.forEach(r => {
+      if (r.plant) options.plant.add(r.plant);
+      if (r.stage) options.stage.add(r.stage);
+      if (r.rowStatus) options.status.add(r.rowStatus);
+      if (r.rowAffectedParameter) options.parameter.add(r.rowAffectedParameter);
+    });
+    return {
+      plant: Array.from(options.plant).sort(),
+      stage: Array.from(options.stage).sort(),
+      status: Array.from(options.status).sort(),
+      parameter: Array.from(options.parameter).sort(),
+    };
+  }, [flattenedRecords]);
+
   const filteredFlattenedRecords = useMemo(() => {
     let result = flattenedRecords;
+
     if (searchQuery) {
       const q = searchQuery.toLowerCase();
       result = result.filter(r => 
@@ -117,13 +164,71 @@ const DataTable: React.FC<DataTableProps> = ({ entries, onDelete, isAdmin }) => 
         (r.rowStatus || '').toLowerCase().includes(q)
       );
     }
+
+    if (columnFilters.plant) result = result.filter(r => r.plant === columnFilters.plant);
+    if (columnFilters.stage) result = result.filter(r => r.stage === columnFilters.stage);
+    if (columnFilters.model) result = result.filter(r => (r.model || '').toLowerCase().includes(columnFilters.model.toLowerCase()));
+    if (columnFilters.serialNo) result = result.filter(r => (r.serialNo || '').toLowerCase().includes(columnFilters.serialNo.toLowerCase()));
+    if (columnFilters.activity) result = result.filter(r => (r.activity || '').toLowerCase().includes(columnFilters.activity.toLowerCase()));
+    if (columnFilters.status) result = result.filter(r => r.rowStatus === columnFilters.status);
+    if (columnFilters.parameter) result = result.filter(r => r.rowAffectedParameter === columnFilters.parameter);
+
     result = result.filter(r => r.displayDate >= startDate && r.displayDate <= endDate);
-    return result.sort((a, b) => {
-      const timeA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
-      const timeB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
-      return timeB - timeA;
+
+    if (sortConfig) {
+      result = [...result].sort((a, b) => {
+        let aValue: any = a[sortConfig.key];
+        let bValue: any = b[sortConfig.key];
+
+        // Handle string-based numbers and other types
+        if (typeof aValue === 'string') aValue = aValue.toLowerCase();
+        if (typeof bValue === 'string') bValue = bValue.toLowerCase();
+
+        if (aValue < bValue) return sortConfig.direction === 'asc' ? -1 : 1;
+        if (aValue > bValue) return sortConfig.direction === 'asc' ? 1 : -1;
+        return 0;
+      });
+    } else {
+      result = [...result].sort((a, b) => {
+        const timeA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+        const timeB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+        return timeB - timeA;
+      });
+    }
+
+    return result;
+  }, [flattenedRecords, searchQuery, columnFilters, startDate, endDate, sortConfig]);
+
+  const handleColumnFilterChange = (column: keyof ColumnFilters, value: string) => {
+    setColumnFilters(prev => ({ ...prev, [column]: value }));
+  };
+
+  const requestSort = (key: string) => {
+    let direction: 'asc' | 'desc' = 'asc';
+    if (sortConfig && sortConfig.key === key && sortConfig.direction === 'asc') {
+      direction = 'desc';
+    }
+    setSortConfig({ key, direction });
+  };
+
+  const getSortIcon = (key: string) => {
+    if (!sortConfig || sortConfig.key !== key) return <ArrowUpDown size={10} className="text-slate-300" />;
+    return sortConfig.direction === 'asc' ? <ArrowUp size={10} className="text-blue-600" /> : <ArrowDown size={10} className="text-blue-600" />;
+  };
+
+  const clearFilters = () => {
+    setColumnFilters({
+      plant: '',
+      stage: '',
+      model: '',
+      serialNo: '',
+      activity: '',
+      status: '',
+      parameter: ''
     });
-  }, [flattenedRecords, searchQuery, startDate, endDate]);
+    setSearchQuery('');
+    setSortConfig(null);
+  };
 
   const manpowerSummary = useMemo(() => {
     const registryRows: any[] = [];
@@ -198,6 +303,29 @@ const DataTable: React.FC<DataTableProps> = ({ entries, onDelete, isAdmin }) => 
     const a = document.createElement('a'); a.href = url; a.download = `vertiv_protrack_${viewMode}.csv`; a.click();
   };
 
+  const hasActiveFilters = Object.values(columnFilters).some(v => v !== '') || searchQuery !== '' || sortConfig !== null;
+
+  const SelectFilter: React.FC<{
+    value: string;
+    onChange: (val: string) => void;
+    options: string[];
+    placeholder: string;
+  }> = ({ value, onChange, options, placeholder }) => (
+    <div className="relative">
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="w-full text-[9px] font-black px-2 py-1 pr-6 border border-slate-200 rounded bg-white/50 outline-none focus:border-blue-500 transition-all appearance-none cursor-pointer uppercase tracking-tighter"
+      >
+        <option value="">{placeholder}</option>
+        {options.map(opt => (
+          <option key={opt} value={opt}>{opt}</option>
+        ))}
+      </select>
+      <ChevronDown size={8} className="absolute right-1.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+    </div>
+  );
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
@@ -206,6 +334,14 @@ const DataTable: React.FC<DataTableProps> = ({ entries, onDelete, isAdmin }) => 
           <button onClick={() => setViewMode('manpower')} className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold transition-all ${viewMode === 'manpower' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}><UserCheck size={16} /> Manpower Registry</button>
         </div>
         <div className="flex flex-wrap items-center gap-3 flex-1 lg:max-w-4xl">
+          {hasActiveFilters && (
+            <button 
+              onClick={clearFilters}
+              className="flex items-center gap-2 px-3 py-2 bg-rose-50 text-rose-600 text-[10px] font-black uppercase tracking-widest rounded-xl border border-rose-100 hover:bg-rose-100 transition-all"
+            >
+              <X size={14} /> Reset View
+            </button>
+          )}
           <div className="flex items-center gap-2 bg-white px-3 py-1.5 rounded-xl border border-slate-200 shadow-sm">
             <CalendarIcon size={14} className="text-slate-400" />
             <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="bg-transparent outline-none text-[11px] font-bold cursor-pointer" />
@@ -214,7 +350,7 @@ const DataTable: React.FC<DataTableProps> = ({ entries, onDelete, isAdmin }) => 
           </div>
           <div className="relative flex-1">
             <SearchIcon size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-            <input type="text" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="Search database..." className="w-full pl-9 pr-4 py-2.5 bg-white rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500/20 outline-none text-xs font-medium" />
+            <input type="text" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="Global database search..." className="w-full pl-9 pr-4 py-2.5 bg-white rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500/20 outline-none text-xs font-medium" />
           </div>
           <button onClick={handleExport} className="flex items-center gap-2 px-4 py-2.5 bg-slate-900 text-white text-xs font-bold rounded-xl hover:bg-slate-800 transition-all"><Download size={14} /> Export CSV</button>
         </div>
@@ -226,20 +362,136 @@ const DataTable: React.FC<DataTableProps> = ({ entries, onDelete, isAdmin }) => 
             <table className="w-full text-sm table-fixed min-w-[1950px]">
               <thead className="bg-slate-50 border-b border-slate-200 sticky top-0 z-20">
                 <tr>
-                  <th className="w-24 px-2 py-4 text-center text-[10px] font-bold text-slate-500 uppercase tracking-wider bg-slate-50">Plant</th>
-                  <th className="w-24 px-2 py-4 text-center text-[10px] font-bold text-slate-500 uppercase tracking-wider bg-slate-50">Entry Date</th>
-                  <th className="w-24 px-2 py-4 text-center text-[10px] font-bold text-slate-500 uppercase tracking-wider bg-slate-50">Prod Date</th>
-                  <th className="w-20 px-2 py-4 text-center text-[10px] font-bold text-slate-500 uppercase tracking-wider bg-slate-50">Shift</th>
-                  <th className="w-24 px-2 py-4 text-center text-[10px] font-bold text-slate-500 uppercase tracking-wider bg-slate-50">Stage</th>
-                  <th className="w-40 px-2 py-4 text-center text-[10px] font-bold text-slate-500 uppercase tracking-wider bg-slate-50">Unit Details</th>
-                  <th className="w-[180px] px-2 py-4 text-center text-[10px] font-bold text-slate-500 uppercase tracking-wider bg-slate-50">Activity</th>
+                  <th className="w-24 px-2 py-4 text-center bg-slate-50">
+                    <div className="flex flex-col gap-1.5">
+                      <button onClick={() => requestSort('plant')} className="flex items-center justify-center gap-1 group">
+                        <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider group-hover:text-blue-600 transition-colors">Plant</span>
+                        {getSortIcon('plant')}
+                      </button>
+                      <SelectFilter 
+                        value={columnFilters.plant}
+                        onChange={(val) => handleColumnFilterChange('plant', val)}
+                        options={filterOptions.plant}
+                        placeholder="ALL"
+                      />
+                    </div>
+                  </th>
+                  <th className="w-24 px-2 py-4 text-center bg-slate-50">
+                    <button onClick={() => requestSort('createdAt')} className="flex items-center justify-center gap-1 group mx-auto">
+                      <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider group-hover:text-blue-600 transition-colors">Entry Date</span>
+                      {getSortIcon('createdAt')}
+                    </button>
+                  </th>
+                  <th className="w-24 px-2 py-4 text-center bg-slate-50">
+                    <button onClick={() => requestSort('displayDate')} className="flex items-center justify-center gap-1 group mx-auto">
+                      <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider group-hover:text-blue-600 transition-colors">Prod Date</span>
+                      {getSortIcon('displayDate')}
+                    </button>
+                  </th>
+                  <th className="w-20 px-2 py-4 text-center bg-slate-50">
+                    <button onClick={() => requestSort('displayShift')} className="flex items-center justify-center gap-1 group mx-auto">
+                      <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider group-hover:text-blue-600 transition-colors">Shift</span>
+                      {getSortIcon('displayShift')}
+                    </button>
+                  </th>
+                  <th className="w-24 px-2 py-4 text-center bg-slate-50">
+                    <div className="flex flex-col gap-1.5">
+                      <button onClick={() => requestSort('stage')} className="flex items-center justify-center gap-1 group mx-auto">
+                        <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider group-hover:text-blue-600 transition-colors">Stage</span>
+                        {getSortIcon('stage')}
+                      </button>
+                      <SelectFilter 
+                        value={columnFilters.stage}
+                        onChange={(val) => handleColumnFilterChange('stage', val)}
+                        options={filterOptions.stage}
+                        placeholder="ALL"
+                      />
+                    </div>
+                  </th>
+                  <th className="w-40 px-2 py-4 text-center bg-slate-50">
+                    <div className="flex flex-col gap-1.5">
+                      <button onClick={() => requestSort('model')} className="flex items-center justify-center gap-1 group mx-auto">
+                        <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider group-hover:text-blue-600 transition-colors">Unit Details</span>
+                        {getSortIcon('model')}
+                      </button>
+                      <div className="grid grid-cols-2 gap-1">
+                        <input 
+                          type="text" 
+                          value={columnFilters.model}
+                          onChange={(e) => handleColumnFilterChange('model', e.target.value)}
+                          placeholder="Mdl"
+                          className="w-full text-[9px] font-bold px-1 py-1 border border-slate-200 rounded bg-white/50 outline-none focus:border-blue-500"
+                        />
+                        <input 
+                          type="text" 
+                          value={columnFilters.serialNo}
+                          onChange={(e) => handleColumnFilterChange('serialNo', e.target.value)}
+                          placeholder="SN"
+                          className="w-full text-[9px] font-bold px-1 py-1 border border-slate-200 rounded bg-white/50 outline-none focus:border-blue-500"
+                        />
+                      </div>
+                    </div>
+                  </th>
+                  <th className="w-[180px] px-2 py-4 text-center bg-slate-50">
+                    <div className="flex flex-col gap-1.5">
+                      <button onClick={() => requestSort('activity')} className="flex items-center justify-center gap-1 group mx-auto">
+                        <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider group-hover:text-blue-600 transition-colors">Activity</span>
+                        {getSortIcon('activity')}
+                      </button>
+                      <input 
+                        type="text" 
+                        value={columnFilters.activity}
+                        onChange={(e) => handleColumnFilterChange('activity', e.target.value)}
+                        placeholder="Filter activity..."
+                        className="w-full text-[9px] font-bold px-2 py-1 border border-slate-200 rounded bg-white/50 outline-none focus:border-blue-500 transition-all"
+                      />
+                    </div>
+                  </th>
                   <th className="w-24 px-2 py-4 text-center text-[10px] font-bold text-slate-500 uppercase tracking-wider bg-slate-50">Shift Start</th>
                   <th className="w-24 px-2 py-4 text-center text-[10px] font-bold text-slate-500 uppercase tracking-wider bg-slate-50">Shift End</th>
-                  <th className="w-28 px-2 py-4 text-center text-[10px] font-bold text-slate-500 uppercase tracking-wider bg-slate-50">Status</th>
-                  <th className="w-36 px-2 py-4 text-right text-[10px] font-bold text-purple-600 uppercase tracking-wider bg-slate-50">Inter-Activity Loss</th>
-                  <th className="w-32 px-2 py-4 text-right text-[10px] font-bold text-rose-600 uppercase tracking-wider bg-slate-50">Activity Loss</th>
-                  <th className="w-20 px-2 py-4 text-center text-[10px] font-bold text-slate-500 uppercase tracking-wider bg-slate-50">Actual</th>
-                  <th className="w-28 px-2 py-4 text-center text-[10px] font-bold text-slate-500 uppercase tracking-wider bg-slate-50">Parameter</th>
+                  <th className="w-28 px-2 py-4 text-center bg-slate-50">
+                    <div className="flex flex-col gap-1.5">
+                      <button onClick={() => requestSort('rowStatus')} className="flex items-center justify-center gap-1 group mx-auto">
+                        <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider group-hover:text-blue-600 transition-colors">Status</span>
+                        {getSortIcon('rowStatus')}
+                      </button>
+                      <SelectFilter 
+                        value={columnFilters.status}
+                        onChange={(val) => handleColumnFilterChange('status', val)}
+                        options={filterOptions.status}
+                        placeholder="ALL"
+                      />
+                    </div>
+                  </th>
+                  <th className="w-36 px-2 py-4 text-right bg-slate-50">
+                    <button onClick={() => requestSort('rowLossHours')} className="flex items-center justify-end gap-1 group ml-auto">
+                      <span className="text-[10px] font-bold text-purple-600 uppercase tracking-wider group-hover:text-blue-600 transition-colors">Inter-Activity Loss</span>
+                      {getSortIcon('rowLossHours')}
+                    </button>
+                  </th>
+                  <th className="w-32 px-2 py-4 text-right bg-slate-50">
+                    <button onClick={() => requestSort('rowLossHours')} className="flex items-center justify-end gap-1 group ml-auto">
+                      <span className="text-[10px] font-bold text-rose-600 uppercase tracking-wider group-hover:text-blue-600 transition-colors">Activity Loss</span>
+                      {getSortIcon('rowLossHours')}
+                    </button>
+                  </th>
+                  <th className="w-20 px-2 py-4 text-center bg-slate-50">
+                    <button onClick={() => requestSort('displayActual')} className="flex items-center justify-center gap-1 group mx-auto">
+                      <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider group-hover:text-blue-600 transition-colors">Actual</span>
+                      {getSortIcon('displayActual')}
+                    </button>
+                  </th>
+                  <th className="w-28 px-2 py-4 text-center bg-slate-50">
+                    <div className="flex flex-col gap-1.5">
+                      <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Parameter</span>
+                      <SelectFilter 
+                        value={columnFilters.parameter}
+                        onChange={(val) => handleColumnFilterChange('parameter', val)}
+                        options={filterOptions.parameter}
+                        placeholder="ALL"
+                      />
+                    </div>
+                  </th>
                   <th className="w-28 px-2 py-4 text-center text-[10px] font-bold text-slate-500 uppercase tracking-wider bg-slate-50">Defect</th>
                   <th className="px-2 py-4 text-left text-[10px] font-bold text-slate-500 uppercase tracking-wider min-w-[200px] bg-slate-50">Issue Description</th>
                   {isAdmin && <th className="w-12 px-2 py-4 text-right bg-slate-50"></th>}
