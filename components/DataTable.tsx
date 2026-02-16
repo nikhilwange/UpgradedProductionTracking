@@ -494,7 +494,6 @@ const DataTable: React.FC<DataTableProps> = ({ entries, onDelete, isAdmin }) => 
                   </th>
                   <th className="w-28 px-2 py-4 text-center text-[10px] font-bold text-slate-500 uppercase tracking-wider bg-slate-50">Defect</th>
                   <th className="px-2 py-4 text-left text-[10px] font-bold text-slate-500 uppercase tracking-wider min-w-[200px] bg-slate-50">Issue Description</th>
-                  {isAdmin && <th className="w-12 px-2 py-4 text-right bg-slate-50"></th>}
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -530,11 +529,6 @@ const DataTable: React.FC<DataTableProps> = ({ entries, onDelete, isAdmin }) => 
                     <td className="px-2 py-3 text-center"><span className={`text-[9px] font-black px-1.5 py-0.5 rounded ${row.rowAffectedParameter ? 'bg-slate-100 text-slate-600 border border-slate-200' : 'text-slate-300'}`}>{row.rowAffectedParameter || '—'}</span></td>
                     <td className="px-2 py-3 text-center"><span className={`text-[9px] font-black px-1.5 py-0.5 rounded ${row.rowDefectCategory ? 'bg-slate-100 text-slate-600 border border-slate-200' : 'text-slate-300'}`}>{row.rowDefectCategory || '—'}</span></td>
                     <td className="px-2 py-3 text-left"><p className="text-[9px] font-medium text-slate-500 line-clamp-2 italic leading-tight">{row.rowIssueDescription || '—'}</p></td>
-                    {isAdmin && (
-                      <td className="px-2 py-3 text-right">
-                        <button onClick={() => onDelete(row.id)} className="text-slate-300 hover:text-red-500 transition-colors p-1" title="Delete Record"><Trash2 size={12} /></button>
-                      </td>
-                    )}
                   </tr>
                 ))}
               </tbody>

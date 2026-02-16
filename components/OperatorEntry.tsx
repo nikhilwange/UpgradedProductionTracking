@@ -35,6 +35,13 @@ const fromMins = (mins: number) => {
   return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`;
 };
 
+const formatDateISO = (date: Date) => {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+};
+
 const FormDateTimeInput: React.FC<{
   type: 'date' | 'time';
   value: string;
@@ -233,16 +240,16 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
     endBoundary.setHours(23, 59, 59, 999);
     
     while (d <= endBoundary) {
-      // Use toLocaleDateString('en-CA') for ISO formatted YYYY-MM-DD in local time
-      const dateStr = d.toLocaleDateString('en-CA');
+      const dateStr = formatDateISO(d);
+      const isSunday = d.getDay() === 0;
       
-      if (!HOLIDAYS_LIST.includes(dateStr)) {
+      if (!isSunday && !HOLIDAYS_LIST.includes(dateStr)) {
         const dayStartMs = new Date(`${dateStr}T00:00:00`).getTime();
         const relStart = Math.max(0, (startMs - dayStartMs) / 60000);
         const relEnd = Math.min(1440, (endMs - dayStartMs) / 60000);
         
-        // INTER-ACTIVITY LOSS SHOULD NOT CONSIDER BREAKS AND NON-WORKING HOURS
-        // Clip to standard shift operational window (07:00 to 23:30)
+        // INTER-ACTIVITY LOSS EXCLUSION: Clip strictly to factory operational window (07:00 to 23:30)
+        // This ensures non-working hours are NOT counted in gap loss.
         const s = Math.max(relStart, S1_START); 
         const e = Math.min(relEnd, S2_END);
         
@@ -251,7 +258,7 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
           let dailyBreakMins = 0;
           
           BREAK_TIMES.forEach(b => {
-            if (b.name === 'Non Working Hours') return; // Handled by S1_START/S2_END clipping
+            if (b.name === 'Non Working Hours') return; 
             const bs = toMins(b.start);
             const be = toMins(b.end);
             const os = Math.max(s, bs);
@@ -315,7 +322,7 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
           .from('production_entries')
           .select('*')
           .ilike('serial_no', cleanSerial)
-          .eq('stage', activity) // Activity column in DB is 'stage'
+          .eq('stage', activity) 
           .eq('status', 'In Progress')
           .maybeSingle();
 
@@ -370,13 +377,15 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
           setProductionDate(now.toISOString().split('T')[0]);
         }
 
+        // QUERY UPDATED: Using production_date and end_time for robust logical sorting
         const { data, error } = await supabase
           .from('production_entries')
           .select('end_time, end_date, production_date, stage')
           .ilike('serial_no', cleanSerial)
           .eq('status', 'Completed')
           .neq('stage', 'Inter-Activity Idle Time')
-          .order('created_at', { ascending: false })
+          .order('production_date', { ascending: false })
+          .order('end_time', { ascending: false })
           .limit(1)
           .maybeSingle();
 
@@ -399,7 +408,11 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
   useEffect(() => { if (!activeInProgressEntry) setEndDate(productionDate); }, [productionDate, activeInProgressEntry]);
 
   const calculateNetInWindow = (start: number, end: number, winStart: number, winEnd: number, dateStr?: string) => {
-    if (dateStr && HOLIDAYS_LIST.includes(dateStr)) return 0;
+    if (dateStr) {
+      if (HOLIDAYS_LIST.includes(dateStr)) return 0;
+      const d = new Date(`${dateStr}T00:00:00`);
+      if (d.getDay() === 0) return 0;
+    }
     const s = Math.max(start, winStart);
     const e = Math.min(end, winEnd);
     if (s >= e) return 0;
@@ -425,8 +438,9 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
     const endD = new Date(endDate);
     
     while (d <= endD) {
-      const dateStr = d.toLocaleDateString('en-CA');
-      if (HOLIDAYS_LIST.includes(dateStr)) { d.setDate(d.getDate() + 1); continue; }
+      const dateStr = formatDateISO(d);
+      const isSunday = d.getDay() === 0;
+      if (isSunday || HOLIDAYS_LIST.includes(dateStr)) { d.setDate(d.getDate() + 1); continue; }
       const dayStart = new Date(`${dateStr}T00:00:00`).getTime();
       const relStart = Math.max(0, (startMs - dayStart) / 60000);
       const relEnd = Math.min(1440, (endMs - dayStart) / 60000);
@@ -541,7 +555,8 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
             plant: context.plant,
             stage: "Idle / Transition",
             productLine, model, serialNo, unitSrNo, soSqNo,
-            productionDate: lastLog.endDate, endDate: productionDate,
+            productionDate: productionDate, // Attribution now correctly follows production context
+            endDate: productionDate,
             shift: 'Shift 1', activity: "Inter-Activity Idle Time",
             manpower: 1, manpowerNames: [], assignments: [],
             startTime: lastLog.endTime, endTime: startTime,

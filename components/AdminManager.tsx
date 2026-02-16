@@ -1,4 +1,3 @@
-
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { Edit2, Trash2, Search, Filter, Calendar, User, Save, X, AlertTriangle, Clock, MapPin, Hash, Package, Users, DatabaseZap, Loader2, Plus, Minus, Layout, Layers, Tag, CheckCircle2, ShieldAlert } from 'lucide-react';
 import { ProductionEntry, ShiftAssignment } from '../types';
@@ -105,9 +104,6 @@ const AdminManager: React.FC<AdminManagerProps> = ({ entries, onUpdate, onDelete
           <option value="all">All Operators</option>
           {uniqueUsers.map(u => <option key={u} value={u}>{u}</option>)}
         </select>
-        <button onClick={() => { if(confirm("Clear database?")) onClear(); }} className="px-4 py-2 bg-rose-50 text-rose-600 border border-rose-200 rounded-xl text-xs font-bold flex items-center gap-2">
-          <DatabaseZap size={14} /> Clear System
-        </button>
       </div>
 
       <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden">
@@ -119,7 +115,7 @@ const AdminManager: React.FC<AdminManagerProps> = ({ entries, onUpdate, onDelete
                 <th className="px-6 py-4 text-left text-[10px] uppercase">Unit ID</th>
                 <th className="px-6 py-4 text-left text-[10px] uppercase">Activity</th>
                 <th className="px-6 py-4 text-center text-[10px] uppercase">Duration</th>
-                <th className="px-6 py-4 text-right text-[10px] uppercase tracking-widest">Controls</th>
+                <th className="px-6 py-4 text-right text-[10px] uppercase tracking-widest">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -136,7 +132,6 @@ const AdminManager: React.FC<AdminManagerProps> = ({ entries, onUpdate, onDelete
                   <td className="px-6 py-4 text-right">
                     <div className="flex items-center justify-end gap-2">
                       <button onClick={() => handleEditClick(entry)} className="p-2 text-slate-300 hover:text-blue-600 transition-all"><Edit2 size={16} /></button>
-                      <button onClick={() => onDelete(entry.id)} className="p-2 text-slate-300 hover:text-red-600 transition-all"><Trash2 size={16} /></button>
                     </div>
                   </td>
                 </tr>

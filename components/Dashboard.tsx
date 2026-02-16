@@ -1,11 +1,10 @@
-
 import React, { useMemo, useState, useEffect, useRef } from 'react';
 import { 
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer 
 } from 'recharts';
 import { TrendingUp, Clock, AlertTriangle, Package, ChevronDown, Activity as ActivityIcon, FileText, Timer, Filter, Globe, Loader2 } from 'lucide-react';
 import { ProductionEntry } from '../types';
-import { ACTIVITIES_LIST, ACTIVITY_STANDARDS, PLANT_REGISTRY } from '../constants';
+import { ACTIVITIES_LIST, ACTIVITY_STANDARDS, PLANT_REGISTRY, calculateAvailableMinutes } from '../constants';
 
 interface DashboardProps {
   entries: ProductionEntry[];
@@ -174,8 +173,9 @@ const Dashboard: React.FC<DashboardProps> = ({ entries, plant, userRole }) => {
         return !isIdle;
       })
       .sort((a, b) => {
-        const timeA = new Date(a.createdAt).getTime();
-        const timeB = new Date(b.createdAt).getTime();
+        // Use production date and start time for robust chronological sorting
+        const timeA = new Date(`${a.productionDate}T${a.startTime}`).getTime();
+        const timeB = new Date(`${b.productionDate}T${b.startTime}`).getTime();
         return timeA - timeB;
       });
 
@@ -187,8 +187,8 @@ const Dashboard: React.FC<DashboardProps> = ({ entries, plant, userRole }) => {
 
     const consolidated = Object.entries(groups).map(([activityName, shifts]) => {
       const sortedShifts = [...shifts].sort((a, b) => {
-        const tA = new Date(a.createdAt).getTime();
-        const tB = new Date(b.createdAt).getTime();
+        const tA = new Date(`${a.productionDate}T${a.startTime}`).getTime();
+        const tB = new Date(`${b.productionDate}T${b.startTime}`).getTime();
         return tA - tB;
       });
       
@@ -221,13 +221,15 @@ const Dashboard: React.FC<DashboardProps> = ({ entries, plant, userRole }) => {
     consolidated.forEach((group, idx) => {
       // Check for gaps (Inter-Activity Idle Time)
       if (idx > 0 && group.startMs > absoluteLatestEndMs && absoluteLatestEndMs !== -Infinity) {
-        const gapMins = (group.startMs - absoluteLatestEndMs) / 60000;
-        if (gapMins >= 1) {
+        // EXCLUSION LOGIC: Use the shared helper to calculate available working minutes only
+        const workingGapMins = calculateAvailableMinutes(absoluteLatestEndMs, group.startMs);
+        
+        if (workingGapMins >= 1) {
           nodes.push({
             type: 'gap',
             idleStart: lastTimeStr,
             idleEnd: group.startTime,
-            lossHours: (gapMins / 60).toFixed(2),
+            lossHours: (workingGapMins / 60).toFixed(2),
             date: group.date
           });
         }
