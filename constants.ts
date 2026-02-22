@@ -22,7 +22,7 @@ const CHAKAN_CH_STAGE_MAPPING: Record<string, string[]> = {
   "Brazing": ["Discharge Line", "Liquid Line", "Fan Assembly", "Fan Wiring"],
   "Wiring": ["Insulation", "Valves Fitting", "Wiring", "Vacuuming", "Refrigerant"],
   "Dry Run Test": ["Dry Run Test"],
-  "Lab": ["Eol"],
+  "Lab": ["EOL"],
   "Finishing": ["Finishing"]
 };
 
@@ -33,7 +33,7 @@ const CHAKAN_NH_ACTIVITY_STANDARDS: Record<string, number> = {
 const CHAKAN_CH_ACTIVITY_STANDARDS: Record<string, number> = {
   ...CHAKAN_NH_ACTIVITY_STANDARDS,
   "Hydraulic Pipe Line Installation": 450,
-  "Eol": 900
+  "EOL": 900
 };
 
 // --- DSE Configuration (Now assigned to Chakan) ---
@@ -56,51 +56,50 @@ const CHAKAN_DSE_ACTIVITY_STANDARDS: Record<string, number> = {
   "Dispatch Ready": 20
 };
 
-// --- Updated Li7 Configuration for Ambernath (Standardized to Uppercase) ---
+// --- Updated Li7 Configuration for Ambernath (Standardized to Title Case) ---
 const AMBERNATH_LI7_STAGE_MAPPING: Record<string, string[]> = {
-  "PCA ASSEMBLY": [
-    "1 BIN KITTING",
-    "PCA DISMANTLE FROM BATT CABINET",
-    "COMPONENT & BUSBAR ASSEMBLY",
-    "WIRING & ROUTING",
-    "TORQUE MARKING & PREFINISHING",
-    "LABELLING & FINISHING",
-    "TESTING"
+  "Batt Cabinet Loading": [
+    "Chassis Dismantle",
+    "Batt Insertion",
+    "Vertical Bus Bar Fitment and BMS Module Assembly"
   ],
-  "BATT CABINET LOADING": [
-    "CHASSIS DISMANTLE",
-    "BATT INSERTION",
-    "VERTICAL BUS BAR FITMENT",
-    "BMS MODULE ASSEMBLY"
+  "Wiring": [
+    "Wiring",
+    "Routing",
+    "Stickering and Pre-Finishing"
   ],
-  "WIRING": [
-    "WIRING",
-    "ROUTING",
-    "STICKERING",
-    "PRE-FINISHING"
-  ],
-  "TESTING": ["EOL"],
-  "FINISHING": ["FINISHING"]
+  "Testing": ["EOL"],
+  "Finishing": ["Finishing"]
 };
 
 const AMBERNATH_LI7_ACTIVITY_STANDARDS: Record<string, number> = {
-  "1 BIN KITTING": 10,
-  "PCA DISMANTLE FROM BATT CABINET": 10,
-  "COMPONENT & BUSBAR ASSEMBLY": 40,
-  "WIRING & ROUTING": 45,
-  "TORQUE MARKING & PREFINISHING": 35,
-  "LABELLING & FINISHING": 15,
-  "TESTING": 55,
-  "CHASSIS DISMANTLE": 40,
-  "BATT INSERTION": 70,
-  "VERTICAL BUS BAR FITMENT": 25,
-  "BMS MODULE ASSEMBLY": 35,
-  "WIRING": 75,
-  "ROUTING": 40,
-  "STICKERING": 40,
-  "PRE-FINISHING": 10,
+  "Chassis Dismantle": 40,
+  "Batt Insertion": 70,
+  "Vertical Bus Bar Fitment and BMS Module Assembly": 60,
+  "Wiring": 75,
+  "Routing": 40,
+  "Stickering and Pre-Finishing": 50,
   "EOL": 90,
-  "FINISHING": 20
+  "Finishing": 20
+};
+
+// --- Li7 PCA Configuration for Ambernath ---
+const AMBERNATH_LI7_PCA_STAGE_MAPPING: Record<string, string[]> = {
+  "PCA Assembly": [
+    "1 Bin Kitting and PCA Dismantle from Batt Cabinet",
+    "Component & Busbar Assembly",
+    "Wiring & Routing",
+    "Torque Marking, Prefinishing, Labelling & Finishing",
+    "Testing"
+  ]
+};
+
+const AMBERNATH_LI7_PCA_ACTIVITY_STANDARDS: Record<string, number> = {
+  "1 Bin Kitting and PCA Dismantle from Batt Cabinet": 20,
+  "Component & Busbar Assembly": 40,
+  "Wiring & Routing": 45,
+  "Torque Marking, Prefinishing, Labelling & Finishing": 50,
+  "Testing": 55
 };
 
 // --- Master Plant Config Registry ---
@@ -124,9 +123,13 @@ export const PLANT_REGISTRY: Record<string, any> = {
   },
   "AMBERNATH": {
     "models": {
-      "LI7": {
+      "Li7": {
         mapping: AMBERNATH_LI7_STAGE_MAPPING,
         standards: AMBERNATH_LI7_ACTIVITY_STANDARDS
+      },
+      "Li7 PCA": {
+        mapping: AMBERNATH_LI7_PCA_STAGE_MAPPING,
+        standards: AMBERNATH_LI7_PCA_ACTIVITY_STANDARDS
       }
     }
   }
@@ -138,8 +141,11 @@ export const getModelContext = (serialNo: string, model: string, currentPlant?: 
   const m = model.trim().toUpperCase();
 
   // Explicit check for Li7 model
-  if (m === 'LI7' || m.includes('LI7')) {
-    return { plant: "AMBERNATH", type: "LI7", ...PLANT_REGISTRY.AMBERNATH.models.LI7 };
+  if (m === 'LI7' || m === 'Li7' || m.includes('LI7') || m.includes('Li7')) {
+    if (m.includes('PCA')) {
+      return { plant: "AMBERNATH", type: "Li7 PCA", ...PLANT_REGISTRY.AMBERNATH.models["Li7 PCA"] };
+    }
+    return { plant: "AMBERNATH", type: "Li7", ...PLANT_REGISTRY.AMBERNATH.models.Li7 };
   }
 
   // Logic to determine plant and model sub-type
@@ -149,7 +155,7 @@ export const getModelContext = (serialNo: string, model: string, currentPlant?: 
   
   // Fallback to plant context if provided
   if (currentPlant === "AMBERNATH") {
-    return { plant: "AMBERNATH", type: "LI7", ...PLANT_REGISTRY.AMBERNATH.models.LI7 };
+    return { plant: "AMBERNATH", type: "Li7", ...PLANT_REGISTRY.AMBERNATH.models.Li7 };
   }
   
   // Default to Chakan NH for legacy/unspecified
@@ -162,11 +168,11 @@ export const ACTIVITY_STANDARDS = CHAKAN_NH_ACTIVITY_STANDARDS; // Legacy compat
 export const STAGES_LIST = Object.keys(CHAKAN_NH_STAGE_MAPPING);
 
 export const PRODUCT_LINES_LIST = [
-  "PDX 1 / 1.5 BAY", "SCU", "PDX 2 / 3 BAY", "PCW 1 / 2 BAY", "PCW 3 / 4 BAY", "FAN ASSEMBLY", "CHILLER", "CHILLER 1", "CHILLER 2", "FWU - 1", "FWU - 2", "FWU - 3", "DSE", "CRV/CRV+", "PKDX", "LI7"
+  "PDX 1 / 1.5 BAY", "SCU", "PDX 2 / 3 BAY", "PCW 1 / 2 BAY", "PCW 3 / 4 BAY", "FAN ASSEMBLY", "CHILLER", "CHILLER 1", "CHILLER 2", "FWU - 1", "FWU - 2", "FWU - 3", "DSE", "CRV/CRV+", "PKDX", "Li7", "Li7 PCA"
 ];
 
 export const MODELS_LIST = [
-  "PDX", "PCW", "PNW", "CRV", "CRV+", "SCU", "DME", "CHILLER", "VANTAGE", "PKDX", "FWU", "DSE INDOOR", "DSE OUTDOOR", "LI7"
+  "PDX", "PCW", "PNW", "CRV", "CRV+", "SCU", "DME", "CHILLER", "VANTAGE", "PKDX", "FWU", "DSE INDOOR", "DSE OUTDOOR", "Li7", "Li7 PCA"
 ];
 
 export const SERIAL_NUMBERS_LIST = [
@@ -186,7 +192,8 @@ export const OPERATORS_BY_MODEL_LINE: Record<string, string[]> = {
   "FWU - 2": ["Narayan Pawar", "Sudhir Mokal", "Ganesh Chavan", "Snehalata Yevrikar", "Pooja Waghmare", "Shankar Jadhav", "Chetan Vagade", "Sagar Gaikwad", "Ajay Bhore", "Manoj Patil", "Rushikesh Davari", "Omkar Gavade", "Sagar Mane", "Shree Bhosale", "Suraj Jagdale", "Rakesh Sonawane", "Indra Gaikwad", "Prashant Koli", "Omkar Ghag", "Vaibhav Salgar", "Harshat Kurewar", "Prathamesh Ganeshkar", "Ashwini Rathod", "Namdev Khavare", "Adhikrao Ingale", "Yogesh Raskar", "Keshav Khot", "Sameer Patil", "Tushar Shikhare", "Suraj Pachumbre", "Pralhad Barhate", "Tanmay Kale", "Shashikant Kamble", "Suraj Patil", "Indrajit Patil", "Vishal Markal", "Geeta Patel"],
   "PDX 2 / 3 BAY": ["Nikhil Gaikwad", "Amol Shelke", "Mahesh Jantre", "Narendra Raut", "Deepak Gaikar", "Trushank Tambe", "Pravin Raut", "Sameer Gage", "Suraj Kamble", "Parmeshwar Jedhe", "Surjeet Sah", "Swati Jadhav", "Dnyaneshwar Shinde", "Ritesh Zope", "Nishikant Gondhale", "Nilesh Kurwade", "Tanuja Jagdane", "Pallavi Fagare", "Sujit Dongare", "Rupesh Gharat", "Pratik Salunkhe", "Ajay Yadav", "Subhash Patil", "Yogesh Dhuware"],
   "PDX 1 / 1.5 BAY": ["Nilesh Naik", "Pandurang Pisal", "Raghunath Thakare", "Nitin Sonawane", "Dharmesh Savaji", "Jai Bhoir", "Ajay Mirkute", "Kundlik Padir", "Gaurav Kharat", "Arati Archana", "Vaibhav Rakhonde", "Kishor Pawar", "Altaf Shaha", "Sandip Davari", "Pallavi Patil", "Shruti Dhande", "Svaraj Gaykwad", "Akash Kurhekar", "Hanumant Gaikwad", "Rahul Mali", "Raviraj Bhate", "Vinayak Magdum"],
-  "LI7": ["Amit Shinde", "Sagar Patil", "Rahul More", "Vikas Jadhav", "Prakash Koli"]
+  "Li7": ["Amit Shinde", "Sagar Patil", "Rahul More", "Vikas Jadhav", "Prakash Koli"],
+  "Li7 PCA": ["Amit Shinde", "Sagar Patil", "Rahul More", "Vikas Jadhav", "Prakash Koli"]
 };
 
 export const LOSS_PARAMETER_MAPPING: Record<string, string[]> = {
@@ -216,6 +223,12 @@ export const BREAK_TIMES = [
   { name: 'Evening', start: '18:30', end: '18:45', duration: 15 },
   { name: 'Dinner', start: '21:00', end: '21:30', duration: 30 },
   { name: 'Non Working Hours', start: '23:31', end: '06:59', duration: 448 }
+];
+
+export const AMBERNATH_BREAK_TIMES = [
+  { name: 'Lunch', start: '12:15', end: '12:45', duration: 30 },
+  { name: 'Tea', start: '15:45', end: '16:00', duration: 15 },
+  { name: 'Non Working Hours', start: '17:31', end: '08:59', duration: 928 }
 ];
 
 export const HOLIDAYS_LIST = [
@@ -248,20 +261,29 @@ export const toMins = (time: string) => {
   return (h || 0) * 60 + (m || 0);
 };
 
-export const calculateAvailableMinutes = (startMs: number, endMs: number): number => {
+export const calculateAvailableMinutes = (startMs: number, endMs: number, customBreakTimes?: any[]): number => {
   if (isNaN(startMs) || isNaN(endMs) || endMs <= startMs) return 0;
   
   let totalAvailable = 0;
   
-  // Standard operational window for the plant: 07:00 to 23:30 (covering both Shift 1 & Shift 2)
-  const OP_START = 420; // 07:00
-  const OP_END = 1410;  // 23:30
+  const activeBreaks = customBreakTimes || BREAK_TIMES;
+  const nonWorking = activeBreaks.find(b => b.name === 'Non Working Hours');
+  
+  // Operational window: Default is 07:00 to 23:30. 
+  // If custom non-working hours are provided, we derive the window from them.
+  let OP_START = 420; // 07:00
+  let OP_END = 1410;  // 23:30
+  
+  if (nonWorking) {
+    OP_START = toMins(nonWorking.end);
+    OP_END = toMins(nonWorking.start);
+  }
 
   const iter = new Date(startMs);
-  iter.setHours(0, 0, 0, 0); // Start at the beginning of the start day
+  iter.setHours(0, 0, 0, 0); 
   
   const limit = new Date(endMs);
-  limit.setHours(23, 59, 59, 999); // End at the end of the end day
+  limit.setHours(23, 59, 59, 999); 
 
   while (iter <= limit) {
     const y = iter.getFullYear();
@@ -269,24 +291,21 @@ export const calculateAvailableMinutes = (startMs: number, endMs: number): numbe
     const d = String(iter.getDate()).padStart(2, '0');
     const dateStr = `${y}-${m}-${d}`;
     
-    // Non-working days: Sundays (getDay() === 0) or specific holidays
     const isSunday = iter.getDay() === 0;
     
     if (!isSunday && !HOLIDAYS_LIST.includes(dateStr)) {
       const dayStartMs = new Date(`${dateStr}T00:00:00`).getTime();
       
-      // Calculate the intersection of the gap and this specific day
       const relStart = Math.max(0, (startMs - dayStartMs) / 60000);
       const relEnd = Math.min(1440, (endMs - dayStartMs) / 60000);
       
-      // Intersect with operational factory hours
       const s = Math.max(relStart, OP_START);
       const e = Math.min(relEnd, OP_END);
       
       if (s < e) {
         let dailyMins = e - s;
         let breakMins = 0;
-        BREAK_TIMES.forEach(b => {
+        activeBreaks.forEach(b => {
           if (b.name === 'Non Working Hours') return;
           const bs = toMins(b.start);
           const be = toMins(b.end);

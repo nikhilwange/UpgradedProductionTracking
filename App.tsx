@@ -161,7 +161,7 @@ const App: React.FC = () => {
 
     initializeTerminal();
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, newSession) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event: any, newSession) => {
       if (event === 'SIGNED_OUT' || event === 'USER_DELETED') {
         setSession(null);
         setUserRole(null);

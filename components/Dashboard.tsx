@@ -4,7 +4,7 @@ import {
 } from 'recharts';
 import { TrendingUp, Clock, AlertTriangle, Package, ChevronDown, Activity as ActivityIcon, FileText, Timer, Filter, Globe, Loader2 } from 'lucide-react';
 import { ProductionEntry } from '../types';
-import { ACTIVITIES_LIST, ACTIVITY_STANDARDS, PLANT_REGISTRY, calculateAvailableMinutes } from '../constants';
+import { ACTIVITIES_LIST, ACTIVITY_STANDARDS, PLANT_REGISTRY, calculateAvailableMinutes, AMBERNATH_BREAK_TIMES, MODELS_LIST } from '../constants';
 
 interface DashboardProps {
   entries: ProductionEntry[];
@@ -119,15 +119,30 @@ const Dashboard: React.FC<DashboardProps> = ({ entries, plant, userRole }) => {
 
   const availablePlants = useMemo(() => {
     const plants = new Set(entries.map(e => e.plant));
+    plants.add('CHAKAN');
+    plants.add('AMBERNATH');
     return ['All', ...Array.from(plants).sort()];
   }, [entries]);
 
   const availableModels = useMemo(() => {
     const relevantEntries = entries.filter(e => selectedPlantFilter === 'All' || e.plant === selectedPlantFilter);
-    const models = new Set(relevantEntries.map(e => e.model));
+    const models = new Set(relevantEntries.map(e => {
+      const m = e.model.toUpperCase();
+      if (m === 'LI7') return 'Li7';
+      if (m === 'LI7 PCA') return 'Li7 PCA';
+      return e.model;
+    }));
+    
     const list = Array.from(models).sort();
     return ['All', ...list];
   }, [entries, selectedPlantFilter]);
+
+  // Reset model filter if it's no longer available for the selected plant
+  useEffect(() => {
+    if (selectedModelFilter !== 'All' && !availableModels.includes(selectedModelFilter)) {
+      setSelectedModelFilter('All');
+    }
+  }, [selectedPlantFilter, availableModels, selectedModelFilter]);
 
   // Auto-select first model besides 'All' on initial data load
   useEffect(() => {
@@ -151,8 +166,12 @@ const Dashboard: React.FC<DashboardProps> = ({ entries, plant, userRole }) => {
   }, [filteredUnitsList, selectedSerial]);
 
   const pipelineActivities = useMemo(() => {
-    if (selectedModelFilter === 'LI7') {
-      return Object.values(PLANT_REGISTRY.AMBERNATH.models.LI7.mapping).flat() as string[];
+    const m = selectedModelFilter.toUpperCase();
+    if (m === 'LI7') {
+      return Object.values(PLANT_REGISTRY.AMBERNATH.models.Li7.mapping).flat() as string[];
+    }
+    if (m === 'LI7 PCA') {
+      return Object.values(PLANT_REGISTRY.AMBERNATH.models["Li7 PCA"].mapping).flat() as string[];
     }
     // For general/mixed pipeline, use the Chakan NH baseline
     return ACTIVITIES_LIST;
@@ -222,7 +241,9 @@ const Dashboard: React.FC<DashboardProps> = ({ entries, plant, userRole }) => {
       // Check for gaps (Inter-Activity Idle Time)
       if (idx > 0 && group.startMs > absoluteLatestEndMs && absoluteLatestEndMs !== -Infinity) {
         // EXCLUSION LOGIC: Use the shared helper to calculate available working minutes only
-        const workingGapMins = calculateAvailableMinutes(absoluteLatestEndMs, group.startMs);
+        const m = selectedModelFilter.toUpperCase();
+        const customBreaks = (m === 'LI7' || m === 'LI7 PCA') ? AMBERNATH_BREAK_TIMES : undefined;
+        const workingGapMins = calculateAvailableMinutes(absoluteLatestEndMs, group.startMs, customBreaks);
         
         if (workingGapMins >= 1) {
           nodes.push({
@@ -254,25 +275,68 @@ const Dashboard: React.FC<DashboardProps> = ({ entries, plant, userRole }) => {
       }
     });
 
-    return nodes;
+    return nodes.filter(node => {
+      if (node.type === 'gap') return Number(node.lossHours) > 0;
+      if (node.type === 'activity') {
+        const hasLoss = node.shifts.some((s: ProductionEntry) => (s.lossHours || 0) > 0);
+        const isInProgress = node.shifts.some((s: ProductionEntry) => s.status === 'In Progress');
+        return hasLoss || isInProgress;
+      }
+      return true;
+    });
   }, [selectedUnitDetail]);
 
+  const currentStandards = useMemo(() => {
+    // Priority: Selected Unit's Model > Selected Model Filter > Default (NH)
+    const modelToUse = (selectedUnitDetail?.model || selectedModelFilter).toUpperCase();
+    
+    if (modelToUse === 'LI7') return PLANT_REGISTRY.AMBERNATH.models.Li7.standards;
+    if (modelToUse === 'LI7 PCA') return PLANT_REGISTRY.AMBERNATH.models["Li7 PCA"].standards;
+    if (modelToUse === 'NH') return PLANT_REGISTRY.CHAKAN.models.NH.standards;
+    if (modelToUse === 'CH') return PLANT_REGISTRY.CHAKAN.models.CH.standards;
+    if (modelToUse === 'DSE') return PLANT_REGISTRY.CHAKAN.models.DSE.standards;
+    
+    return ACTIVITY_STANDARDS;
+  }, [selectedModelFilter, selectedUnitDetail]);
+
+  const getStandardValue = (activityName: string, fallback: number = 0) => {
+    if (!activityName) return fallback;
+    const normalized = activityName.toUpperCase();
+    const match = Object.entries(currentStandards).find(([k]) => k.toUpperCase() === normalized);
+    return match ? (match[1] as number) : fallback;
+  };
+
   const benchmarkData = useMemo(() => {
-    const activityData: Record<string, { standard: number; actualTotal: number; count: number }> = {};
+    const activityData: Record<string, { standard: number; unitTotals: Record<string, number> }> = {};
+    
     filteredEntries.forEach(e => {
       // Exclude In Progress entries and Gap/Idle entries from the performance benchmark
       if (e.status === 'In Progress' || e.isGap || e.activity === "Inter-Activity Idle Time") return;
       
       if (!activityData[e.activity]) {
-        activityData[e.activity] = { standard: ACTIVITY_STANDARDS[e.activity] || 0, actualTotal: 0, count: 0 };
+        const std = getStandardValue(e.activity, e.standardCycleTime || 0);
+        activityData[e.activity] = { standard: std, unitTotals: {} };
       }
-      activityData[e.activity].actualTotal += e.actualCycleTime;
-      activityData[e.activity].count += 1;
+      
+      const unitKey = e.serialNo;
+      activityData[e.activity].unitTotals[unitKey] = (activityData[e.activity].unitTotals[unitKey] || 0) + e.actualCycleTime;
     });
+
     return Object.entries(activityData)
-      .map(([name, data]) => ({ name, Standard: data.standard, Actual: Math.round(data.actualTotal / (data.count || 1)) }))
+      .map(([name, data]) => {
+        const unitValues = Object.values(data.unitTotals);
+        const avgActual = unitValues.length > 0 
+          ? Math.round(unitValues.reduce((a, b) => a + b, 0) / unitValues.length)
+          : 0;
+
+        return { 
+          name, 
+          Standard: data.standard, 
+          Actual: avgActual 
+        };
+      })
       .slice(0, 5);
-  }, [filteredEntries]);
+  }, [filteredEntries, currentStandards]);
 
   const bottleneckData = useMemo(() => {
     const losses: Record<string, number> = {};
@@ -283,6 +347,7 @@ const Dashboard: React.FC<DashboardProps> = ({ entries, plant, userRole }) => {
     });
     return Object.entries(losses)
       .map(([name, hours]) => ({ name, hours }))
+      .filter(item => item.hours > 0)
       .sort((a, b) => b.hours - a.hours);
   }, [filteredEntries]);
 
@@ -404,12 +469,12 @@ const Dashboard: React.FC<DashboardProps> = ({ entries, plant, userRole }) => {
             </div>
           </div>
           <div className="relative overflow-x-auto pb-4 custom-scrollbar">
-            <div className="flex items-start min-w-[2500px] gap-0 px-4">
+            <div className={`flex items-start gap-0 px-4 ${(selectedModelFilter.toUpperCase() === 'LI7' || selectedModelFilter.toUpperCase() === 'LI7 PCA') ? 'min-w-[1200px]' : 'min-w-[2500px]'}`}>
               {pipelineActivities.map((act, idx) => {
                 const activeUnits = Object.entries(activePipelines)
                   .filter(([_, data]: [string, any]) => {
                     const plantMatch = selectedPlantFilter === 'All' || data.plant === selectedPlantFilter;
-                    const modelMatch = selectedModelFilter === 'All' || data.model === selectedModelFilter;
+                    const modelMatch = selectedModelFilter === 'All' || data.model.toUpperCase() === selectedModelFilter.toUpperCase();
                     const activityMatch = data.activity.trim().toUpperCase() === act.trim().toUpperCase();
                     return plantMatch && modelMatch && activityMatch;
                   })
@@ -533,6 +598,7 @@ const Dashboard: React.FC<DashboardProps> = ({ entries, plant, userRole }) => {
             const isCompleted = group.shifts.some((s: ProductionEntry) => s.status === 'Completed');
             const isInProgressOnly = !isCompleted && group.shifts.some((s: ProductionEntry) => s.status === 'In Progress');
             const lossReasons = [...new Set(group.shifts.map((s: ProductionEntry) => s.lossReason).filter((r: string) => r && r !== 'Standard Operation'))];
+            const totalActualForGroup = group.shifts.reduce((sum: number, s: ProductionEntry) => sum + (s.actualCycleTime || 0), 0) || 1;
 
             return (
               <div key={group.activityName} className="relative z-10 flex gap-6 group">
@@ -567,7 +633,7 @@ const Dashboard: React.FC<DashboardProps> = ({ entries, plant, userRole }) => {
                         <span className="text-[10px] font-black text-blue-400 uppercase tracking-widest block ml-1">DATE: {formatDate(group.date)}</span>
                         <div className="flex items-center gap-3">
                           <h4 className="text-xl font-black text-slate-900 tracking-tight leading-none">{toTitleCase(group.activityName)}</h4>
-                          <span className="text-sm font-bold text-slate-400">Activity cycle: {ACTIVITY_STANDARDS[group.activityName] || 0} min</span>
+                          <span className="text-sm font-bold text-slate-400">Activity cycle: {Math.round(getStandardValue(group.activityName, group.shifts[0]?.standardCycleTime || 0))} min</span>
                         </div>
                         {lossReasons.length > 0 && (
                           <div className="mt-2 flex items-center gap-1.5 px-3 py-1 bg-amber-50 text-amber-700 border border-amber-100 rounded-full text-[10px] font-black uppercase leading-none w-fit">
@@ -587,58 +653,65 @@ const Dashboard: React.FC<DashboardProps> = ({ entries, plant, userRole }) => {
                           if (isCompleted && e.status === 'In Progress') return false;
                           return e.manpower > 0 || e.status === 'In Progress';
                         })
-                        .map((entry: ProductionEntry, shiftIdx: number) => (
-                        <div key={entry.id} className={`flex flex-col gap-3 ${shiftIdx > 0 ? 'pt-6 border-t border-slate-100 border-dashed' : ''}`}>
-                          {/* Shift Header Area (Green Box Alignment) */}
-                          <div className="flex flex-col lg:flex-row gap-6 items-center">
-                            {/* Left Partition: Shift Label */}
-                            <div className="flex-1">
-                              <span className={`px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-widest border ${
-                                entry.shift === 'Shift 2' ? 'bg-amber-50 text-amber-600 border-amber-100' : 'bg-blue-50 text-blue-600 border-blue-100'
-                              }`}>
-                                {entry.shift}
-                              </span>
-                            </div>
+                        .map((entry: ProductionEntry, shiftIdx: number) => {
+                          const masterStd = getStandardValue(entry.activity, entry.standardCycleTime || 0);
+                          const isSplit = group.shifts.length > 1 && totalActualForGroup > 1;
+                          const proportionateStd = isSplit ? (entry.actualCycleTime / totalActualForGroup) * masterStd : masterStd;
 
-                            {/* Right Partition: Timeline Header */}
-                            <div className="lg:w-64 lg:pl-8 lg:border-l border-slate-100/0 lg:border-slate-100">
-                              {shiftIdx === 0 && (
-                                <div className="flex items-center justify-between">
-                                  <div className="flex items-center gap-2 text-[11px] font-black text-slate-400 uppercase tracking-[0.2em]">
-                                    <Clock size={16} /> TIMELINE OVERVIEW
-                                  </div>
-                                  {entry.status === 'In Progress' && (
-                                    <span className="text-[8px] font-black bg-amber-100 text-amber-600 px-1.5 rounded animate-pulse">LIVE</span>
+                          return (
+                            <div key={entry.id} className={`flex flex-col gap-3 ${shiftIdx > 0 ? 'pt-6 border-t border-slate-100 border-dashed' : ''}`}>
+                              {/* Shift Header Area (Green Box Alignment) */}
+                              <div className="flex flex-col lg:flex-row gap-6 items-center">
+                                {/* Left Partition: Shift Label */}
+                                <div className="flex-1">
+                                  <span className={`px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-widest border ${
+                                    entry.shift === 'Shift 2' ? 'bg-amber-50 text-amber-600 border-amber-100' : 'bg-blue-50 text-blue-600 border-blue-100'
+                                  }`}>
+                                    {entry.shift}
+                                  </span>
+                                </div>
+
+                                {/* Right Partition: Timeline Header */}
+                                <div className="lg:w-64 lg:pl-8 lg:border-l border-slate-100/0 lg:border-slate-100">
+                                  {shiftIdx === 0 && (
+                                    <div className="flex items-center justify-between">
+                                      <div className="flex items-center gap-2 text-[11px] font-black text-slate-400 uppercase tracking-[0.2em]">
+                                        <Clock size={16} /> TIMELINE OVERVIEW
+                                      </div>
+                                      {entry.status === 'In Progress' && (
+                                        <span className="text-[8px] font-black bg-amber-100 text-amber-600 px-1.5 rounded animate-pulse">LIVE</span>
+                                      )}
+                                    </div>
                                   )}
                                 </div>
-                              )}
-                            </div>
-                          </div>
-
-                          {/* Shift Content Area (Pink Box Alignment) */}
-                          <div className="flex flex-col lg:flex-row gap-6">
-                            {/* Left Partition: Metric Boxes */}
-                            <div className="flex-1 grid grid-cols-2 md:grid-cols-4 gap-3">
-                              <MetricBox label="MANPOWER" value={entry.status === 'In Progress' && entry.manpower === 0 ? 'Awaiting' : (entry.manpower > 0 ? `${entry.manpower} Oper` : 'Awaiting')} />
-                              <MetricBox label="PLANNED MH" value={`${((ACTIVITY_STANDARDS[entry.activity] || 0) / 60 * Math.max(1, entry.manpower)).toFixed(1)} hrs`} />
-                              <MetricBox label="CURR MH" value={entry.status === 'Completed' ? `${(entry.manhoursEngaged || 0).toFixed(1)} hrs` : 'Calculated at end'} />
-                              <MetricBox label="EFFICIENCY" value={entry.status === 'Completed' ? `${Math.round((entry.standardCycleTime / (entry.actualCycleTime || 1)) * 100)}%` : 'TBD'} />
-                            </div>
-
-                            {/* Right Partition: Timing Values */}
-                            <div className="lg:w-64 lg:pl-8 lg:border-l border-slate-100 flex flex-col justify-center gap-2">
-                              <div className="flex items-center justify-between gap-4">
-                                <span className="text-[11px] font-black text-slate-400 uppercase">Actual (Start)</span>
-                                <span className="bg-slate-50 px-3 py-1 rounded-lg text-xs font-black mono text-slate-900 border border-slate-100">{formatTimeDisplay(entry.startTime)}</span>
                               </div>
-                              <div className="flex items-center justify-between gap-4">
-                                <span className="text-[11px] font-black text-slate-400 uppercase">Actual (End)</span>
-                                <span className="bg-slate-50 px-3 py-1 rounded-lg text-xs font-black mono text-slate-900 border border-slate-100">{formatTimeDisplay(entry.status === 'Completed' ? entry.endTime : '-')}</span>
+
+                              {/* Shift Content Area (Pink Box Alignment) */}
+                              <div className="flex flex-col lg:flex-row gap-6">
+                                {/* Left Partition: Metric Boxes */}
+                                <div className="flex-1 grid grid-cols-2 md:grid-cols-4 gap-3">
+                                  <MetricBox label="MANPOWER" value={entry.status === 'In Progress' && entry.manpower === 0 ? 'Awaiting' : (entry.manpower > 0 ? `${entry.manpower} Oper` : 'Awaiting')} />
+                                  <MetricBox label="PLANNED MH" value={`${(proportionateStd / 60 * Math.max(1, entry.manpower)).toFixed(2)} hrs`} />
+                                  <MetricBox label="CURR MH" value={entry.status === 'Completed' ? `${(entry.manhoursEngaged || 0).toFixed(2)} hrs` : 'Calculated at end'} />
+                                  <MetricBox label="EFFICIENCY" value={entry.status === 'Completed' ? `${Math.round((proportionateStd / (entry.actualCycleTime || 1)) * 100)}%` : 'TBD'} />
+                                </div>
+
+                                {/* Right Partition: Timing Values */}
+                                <div className="lg:w-64 lg:pl-8 lg:border-l border-slate-100 flex flex-col justify-center gap-2">
+                                  <div className="flex items-center justify-between gap-4">
+                                    <span className="text-[11px] font-black text-slate-400 uppercase">Actual (Start)</span>
+                                    <span className="bg-slate-50 px-3 py-1 rounded-lg text-xs font-black mono text-slate-900 border border-slate-100">{formatTimeDisplay(entry.startTime)}</span>
+                                  </div>
+                                  <div className="flex items-center justify-between gap-4">
+                                    <span className="text-[11px] font-black text-slate-400 uppercase">Actual (End)</span>
+                                    <span className="bg-slate-50 px-3 py-1 rounded-lg text-xs font-black mono text-slate-900 border border-slate-100">{formatTimeDisplay(entry.status === 'Completed' ? entry.endTime : '-')}</span>
+                                  </div>
+                                </div>
                               </div>
                             </div>
-                          </div>
-                        </div>
-                      ))}
+                          );
+                        })
+}
                     </div>
                   </div>
                 </div>
@@ -663,8 +736,22 @@ const Dashboard: React.FC<DashboardProps> = ({ entries, plant, userRole }) => {
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={benchmarkData} margin={{ top: 10, right: 30, left: 0, bottom: 20 }}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fontSize: 10, fontWeight: 600, fill: '#64748b' }} angle={-35} textAnchor="end" height={60} />
-                <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 10, fontWeight: 600, fill: '#64748b' }} />
+                <XAxis 
+                  dataKey="name" 
+                  axisLine={false} 
+                  tickLine={false} 
+                  tick={{ fontSize: 10, fontWeight: 600, fill: '#64748b' }} 
+                  angle={-35} 
+                  textAnchor="end" 
+                  height={60}
+                  xAxisId={0}
+                />
+                <YAxis 
+                  axisLine={false} 
+                  tickLine={false} 
+                  tick={{ fontSize: 10, fontWeight: 600, fill: '#64748b' }} 
+                  yAxisId={0}
+                />
                 <Tooltip cursor={{ fill: '#f8fafc' }} contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)', fontSize: '12px' }} />
                 <Legend iconType="rect" wrapperStyle={{ paddingTop: '20px', fontSize: '11px', fontWeight: 700 }} />
                 <Bar dataKey="Standard" fill="#e2e8f0" radius={[4, 4, 0, 0]} barSize={30} />
@@ -688,8 +775,22 @@ const Dashboard: React.FC<DashboardProps> = ({ entries, plant, userRole }) => {
             <ResponsiveContainer width="100%" height="100%">
               <BarChart layout="vertical" data={bottleneckData} margin={{ left: 100, right: 30, top: 0, bottom: 0 }}>
                 <CartesianGrid horizontal={false} strokeDasharray="3 3" stroke="#f1f5f9" />
-                <XAxis type="number" axisLine={false} tickLine={false} tick={{ fontSize: 10, fontWeight: 600, fill: '#64748b' }} />
-                <YAxis type="category" dataKey="name" axisLine={false} tickLine={false} tick={{ fontSize: 9, fontWeight: 700, fill: '#64748b' }} width={100} />
+                <XAxis 
+                  type="number" 
+                  axisLine={false} 
+                  tickLine={false} 
+                  tick={{ fontSize: 10, fontWeight: 600, fill: '#64748b' }} 
+                  xAxisId={0}
+                />
+                <YAxis 
+                  type="category" 
+                  dataKey="name" 
+                  axisLine={false} 
+                  tickLine={false} 
+                  tick={{ fontSize: 9, fontWeight: 700, fill: '#64748b' }} 
+                  width={100} 
+                  yAxisId={0}
+                />
                 <Tooltip cursor={{ fill: '#f8fafc' }} contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)', fontSize: '11px' }} />
                 <Bar dataKey="hours" fill="#f43f5e" radius={[0, 4, 4, 0]} barSize={20} />
               </BarChart>

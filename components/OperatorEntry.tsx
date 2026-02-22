@@ -4,7 +4,7 @@ import {
   ChevronDown, RefreshCw, Loader2, ArrowRight, ListChecks, X, AlertCircle, FileText, Scan, CheckCircle2, Activity,
   Filter, ShieldCheck
 } from 'lucide-react';
-import { PLANT_REGISTRY, getModelContext, MODELS_LIST, PRODUCT_LINES_LIST, SERIAL_NUMBERS_LIST, BREAK_TIMES, OPERATORS_BY_MODEL_LINE, LOSS_PARAMETER_MAPPING, HOLIDAYS_LIST } from '../constants';
+import { PLANT_REGISTRY, getModelContext, MODELS_LIST, PRODUCT_LINES_LIST, SERIAL_NUMBERS_LIST, BREAK_TIMES, AMBERNATH_BREAK_TIMES, OPERATORS_BY_MODEL_LINE, LOSS_PARAMETER_MAPPING, HOLIDAYS_LIST, toMins } from '../constants';
 import { ProductionEntry } from '../types';
 import { supabase } from '../supabase';
 import { Html5QrcodeScanner } from 'html5-qrcode';
@@ -117,18 +117,22 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
   const [showSuccessOverlay, setShowSuccessOverlay] = useState(false);
   
   const filteredModels = useMemo(() => {
+    const modelsWithData = new Set(entries.filter(e => e.plant === plant).map(e => e.model.toUpperCase()));
+    
     if (plant === 'AMBERNATH') {
-      return MODELS_LIST.filter(m => m === 'LI7');
+      return MODELS_LIST.filter(m => (m === 'Li7' || m === 'LI7' || m === 'Li7 PCA') && modelsWithData.has(m.toUpperCase()));
     }
-    return MODELS_LIST.filter(m => m !== 'LI7');
-  }, [plant]);
+    return MODELS_LIST.filter(m => m !== 'Li7' && m !== 'LI7' && m !== 'Li7 PCA' && modelsWithData.has(m.toUpperCase()));
+  }, [plant, entries]);
 
   const filteredProductLines = useMemo(() => {
+    const plWithData = new Set(entries.filter(e => e.plant === plant).map(e => e.productLine.toUpperCase()));
+
     if (plant === 'AMBERNATH') {
-      return PRODUCT_LINES_LIST.filter(pl => pl === 'LI7');
+      return PRODUCT_LINES_LIST.filter(pl => (pl === 'Li7' || pl === 'LI7' || pl === 'Li7 PCA') && plWithData.has(pl.toUpperCase()));
     }
-    return PRODUCT_LINES_LIST.filter(pl => pl !== 'LI7');
-  }, [plant]);
+    return PRODUCT_LINES_LIST.filter(pl => pl !== 'Li7' && pl !== 'LI7' && pl !== 'Li7 PCA' && plWithData.has(pl.toUpperCase()));
+  }, [plant, entries]);
 
   const [model, setModel] = useState('');
   const [productLine, setProductLine] = useState('');
@@ -229,6 +233,33 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
     } catch (e) { return NaN; }
   };
 
+  const activeBreaks = useMemo(() => {
+    const m = model.toUpperCase();
+    if (m === 'LI7' || m === 'LI7 PCA') return AMBERNATH_BREAK_TIMES;
+    return BREAK_TIMES;
+  }, [model]);
+
+  const activeShiftBoundaries = useMemo(() => {
+    const m = model.toUpperCase();
+    if (m === 'LI7' || m === 'LI7 PCA') {
+      const nonWorking = AMBERNATH_BREAK_TIMES.find(b => b.name === 'Non Working Hours');
+      if (nonWorking) {
+        return {
+          s1Start: toMins(nonWorking.end),
+          s1End: toMins(nonWorking.start),
+          s2Start: 0,
+          s2End: 0
+        };
+      }
+    }
+    return {
+      s1Start: S1_START,
+      s1End: S1_END,
+      s2Start: S2_START,
+      s2End: S2_END
+    };
+  }, [model]);
+
   const calculateAvailableGapMins = (startMs: number, endMs: number) => {
     if (isNaN(startMs) || isNaN(endMs) || endMs <= startMs) return 0;
     
@@ -248,16 +279,15 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
         const relStart = Math.max(0, (startMs - dayStartMs) / 60000);
         const relEnd = Math.min(1440, (endMs - dayStartMs) / 60000);
         
-        // INTER-ACTIVITY LOSS EXCLUSION: Clip strictly to factory operational window (07:00 to 23:30)
-        // This ensures non-working hours are NOT counted in gap loss.
-        const s = Math.max(relStart, S1_START); 
-        const e = Math.min(relEnd, S2_END);
+        // INTER-ACTIVITY LOSS EXCLUSION: Clip strictly to factory operational window
+        const s = Math.max(relStart, activeShiftBoundaries.s1Start); 
+        const e = Math.min(relEnd, activeShiftBoundaries.s2End || activeShiftBoundaries.s1End);
         
         if (s < e) {
           let dailyWorkingMins = e - s;
           let dailyBreakMins = 0;
           
-          BREAK_TIMES.forEach(b => {
+          activeBreaks.forEach(b => {
             if (b.name === 'Non Working Hours') return; 
             const bs = toMins(b.start);
             const be = toMins(b.end);
@@ -277,7 +307,7 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
   const calculatePredictedFinish = (startStr: string, sctMins: number) => {
     const parseMins = (t: string) => { const [h, m] = t.split(':').map(Number); return (h || 0) * 60 + (m || 0); };
     const formatMins = (m: number) => { const h = Math.floor(m / 60) % 24; const mm = m % 60; return `${String(h).padStart(2, '0')}:${String(mm).padStart(2, '0')}`; };
-    const plantBreaks = BREAK_TIMES.map(b => ({ start: parseMins(b.start), end: parseMins(b.end), duration: b.duration, name: b.name }));
+    const plantBreaks = activeBreaks.map(b => ({ start: parseMins(b.start), end: parseMins(b.end), duration: b.duration, name: b.name }));
     let currentStart = parseMins(startStr);
     let currentEnd = currentStart + sctMins;
     let stable = false;
@@ -417,7 +447,7 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
     const e = Math.min(end, winEnd);
     if (s >= e) return 0;
     let totalBreakMins = 0;
-    BREAK_TIMES.forEach(b => {
+    activeBreaks.forEach(b => {
       const bs = toMins(b.start);
       const be = toMins(b.end);
       if (b.name === 'Non Working Hours') return;
@@ -445,15 +475,18 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
       const relStart = Math.max(0, (startMs - dayStart) / 60000);
       const relEnd = Math.min(1440, (endMs - dayStart) / 60000);
       if (relStart < relEnd) {
-        const s1Mins = calculateNetInWindow(relStart, relEnd, S1_START, S1_END, dateStr);
-        if (s1Mins > 0) assignments.push({ date: dateStr, shift: 'Shift 1', minutes: s1Mins, segStart: fromMins(Math.max(relStart, S1_START)), segEnd: fromMins(Math.min(relEnd, S1_END)) });
-        const s2Mins = calculateNetInWindow(relStart, relEnd, S2_START, S2_END, dateStr);
-        if (s2Mins > 0) assignments.push({ date: dateStr, shift: 'Shift 2', minutes: s2Mins, segStart: fromMins(Math.max(relStart, S2_START)), segEnd: fromMins(Math.min(relEnd, S2_END)) });
+        const s1Mins = calculateNetInWindow(relStart, relEnd, activeShiftBoundaries.s1Start, activeShiftBoundaries.s1End, dateStr);
+        if (s1Mins > 0) assignments.push({ date: dateStr, shift: 'Shift 1', minutes: s1Mins, segStart: fromMins(Math.max(relStart, activeShiftBoundaries.s1Start)), segEnd: fromMins(Math.min(relEnd, activeShiftBoundaries.s1End)) });
+        
+        if (activeShiftBoundaries.s2Start > 0) {
+          const s2Mins = calculateNetInWindow(relStart, relEnd, activeShiftBoundaries.s2Start, activeShiftBoundaries.s2End, dateStr);
+          if (s2Mins > 0) assignments.push({ date: dateStr, shift: 'Shift 2', minutes: s2Mins, segStart: fromMins(Math.max(relStart, activeShiftBoundaries.s2Start)), segEnd: fromMins(Math.min(relEnd, activeShiftBoundaries.s2End)) });
+        }
       }
       d.setDate(d.getDate() + 1);
     }
     return assignments;
-  }, [productionDate, endDate, startTime, endTime]);
+  }, [productionDate, endDate, startTime, endTime, activeBreaks, activeShiftBoundaries]);
 
   useEffect(() => {
     const nextInputs: Record<string, AssignmentInput> = {};
@@ -607,11 +640,11 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
               issueDescription: input.issueDescription
             }],
             startTime: split.segStart, endTime: split.segEnd,
-            standardCycleTime: (split.minutes / (totalActual || 1)) * standardTime,
+            standardCycleTime: Number(((split.minutes / (totalActual || 1)) * standardTime).toFixed(2)),
             actualCycleTime: split.minutes,
             shift1ActualMinutes: split.shift === 'Shift 1' ? split.minutes : 0,
             shift2ActualMinutes: split.shift === 'Shift 2' ? split.minutes : 0,
-            variance: split.minutes - ((split.minutes / (totalActual || 1)) * standardTime),
+            variance: Number((split.minutes - ((split.minutes / (totalActual || 1)) * standardTime)).toFixed(2)),
             manhoursEngaged: (split.minutes / 60) * input.count,
             lossHours: allocatedLoss, lossReason: input.defectCategory || 'Standard Operation',
             affectedParameter: input.affectedParameter, defectCategory: input.defectCategory,
