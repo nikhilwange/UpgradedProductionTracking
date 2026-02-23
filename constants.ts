@@ -192,17 +192,13 @@ const AMBERNATH_STS_ACTIVITY_STANDARDS: Record<string, number> = {
 export const PLANT_REGISTRY: Record<string, any> = {
   "CHAKAN": {
     "models": {
-      "NH": {
+      "CHILLER": {
         mapping: CHAKAN_NH_STAGE_MAPPING,
         standards: CHAKAN_NH_ACTIVITY_STANDARDS
       },
-      "CH": {
+      "PDX": {
         mapping: CHAKAN_CH_STAGE_MAPPING,
         standards: CHAKAN_CH_ACTIVITY_STANDARDS
-      },
-      "DSE": {
-        mapping: CHAKAN_DSE_STAGE_MAPPING,
-        standards: CHAKAN_DSE_ACTIVITY_STANDARDS
       }
     }
   },
@@ -256,17 +252,16 @@ export const getModelContext = (serialNo: string, model: string, currentPlant?: 
   }
 
   // Logic to determine plant and model sub-type
-  if (sn.startsWith('NH')) return { plant: "CHAKAN", type: "NH", ...PLANT_REGISTRY.CHAKAN.models.NH };
-  if (sn.startsWith('CH')) return { plant: "CHAKAN", type: "CH", ...PLANT_REGISTRY.CHAKAN.models.CH };
-  if (m.includes('DSE')) return { plant: "CHAKAN", type: "DSE", ...PLANT_REGISTRY.CHAKAN.models.DSE };
+  if (sn.startsWith('NH')) return { plant: "CHAKAN", type: "CHILLER", ...PLANT_REGISTRY.CHAKAN.models.CHILLER };
+  if (sn.startsWith('CH')) return { plant: "CHAKAN", type: "PDX", ...PLANT_REGISTRY.CHAKAN.models.PDX };
   
   // Fallback to plant context if provided
   if (currentPlant === "AMBERNATH") {
     return { plant: "AMBERNATH", type: "Li7", ...PLANT_REGISTRY.AMBERNATH.models.Li7 };
   }
   
-  // Default to Chakan NH for legacy/unspecified
-  return { plant: "CHAKAN", type: "NH", ...PLANT_REGISTRY.CHAKAN.models.NH };
+  // Default to Chakan CHILLER for legacy/unspecified
+  return { plant: "CHAKAN", type: "CHILLER", ...PLANT_REGISTRY.CHAKAN.models.CHILLER };
 };
 
 export const STAGE_MAPPING = CHAKAN_NH_STAGE_MAPPING; // Legacy compatibility
@@ -297,6 +292,7 @@ export const OPERATORS_BY_MODEL_LINE: Record<string, string[]> = {
   "CHILLER": ["Vimlesh Yadav", "Baliram Rajbhar", "Vedant Jadhav", "Akash Nimkarde", "Vijay Bharude", "Nitesh Mandal", "Dipak Poojari", "Prasant Patil", "Sandhya Sharma", "Rakesh Rajbhar", "Kishan Pal", "Pintu Kumar", "Bhupesh Bhoir", "Ganesh Patil", "Hemant Kokam", "Chetan Mahajan", "Omkar Harane", "Sameer Chavhan", "Ashish Tambutkar", "Chandan Chourasia", "Liladhar Patil", "Suraj Dubakawad", "Kunal Faware", "Sanjay Mandavkar", "Kaustubh Pawar", "Nitin Jadhav", "Dhanraj Patil", "Ganesh Hatankar", "Chetan Malgunkar", "Dipali Khot", "Sanjay Payghade", "Vishal Aware", "Ajinath Kolhe", "Umesh Shinde", "Shankar Thakur", "Manjunath Mastoli", "Mahadev Patole", "Laxman Pradhan", "Dipak Gavali", "Atish Wankhde", "Abhay Bhende", "Prem Khandare", "Prashant Shinde", "Patil Suresh", "Dnyanesh Khairnar", "Pravin Chandekar", "Dinesh Sonawane", "Darshan Jadhar", "Vishal Patil", "Bhushan Patil", "Jayesh Ramane", "Vilas Kande", "Avinash Tayade", "Aditya Bhalekar", "Roshan Kale", "Kiran Yadav", "Dipak Shendage", "Shubham Raut", "Vivek Shinde", "Abhijit Waikar", "Avishakar Patil", "Kuldip Kumar", "Dhanu Naik", "Sagar Damodar", "Shree Singh", "Ratan Kumar", "Pratik Marathe", "Omker Jagatap", "Ashrut Kumar", "Ekanath Patil", "Arbaj Tamboli", "Akshay Adhav", "Ramesh Patil", "Mayur Jadhav", "Ajay Agivale", "Rushikesh Agale", "Binod Kumar", "Sameer Shekh", "Ashik Hussain", "Ramchandra Gadkari"],
   "FWU - 1": ["Hanmant Shinde", "Shivaji Kolekar", "Pratik Bondre", "Sahilpratap Patil", "Ajay Kamble", "Durgadas Punam", "Tipu Pawar", "Prajyot Jambeke", "Ajay Mhatre", "Shyamji Yadav", "Dhanesh Kondilkar", "Sunil Randve", "Savta Gaikwad", "Vinod Bondre", "Manish Nagpure", "Akshay Pokale", "Dharmraj Dane", "Kundan Kumar", "Vaibhav Shinde", "Vishwajit Shelke", "Bharat Sonawane", "Prathmesh Desai", "Satish Kurale", "Khanderav Deokate", "Anant Bhagat", "Abhishek Desai", "Ghanshyam Majhi", "Sangam Bagade", "Samir Kurewar", "Dewanand Tembhurne", "Rahul Jadhav", "Ruchita Mestry", "Sneha Raut", "Nilanchal Sandh", "Rahul Saw", "Shrikisan Kayande", "Kiran Patil", "Bhumendra Daharwal", "Saurabh Sahane", "Ram Chandara", "Shubham Pawar", "Roshan Vaidya", "Ritesh Nagade", "Roshan Thakare", "Shyam Bhande", "Sanket Patil", "Omkar Tate", "Hasen Ali", "Yaseen Chappardhand", "Ram Kumar", "Santhosh Topale", "Prajakta More", "Vedant Jadhav", "Shubham Augad", "Ajay Kumar", "Mohammad Jafar", "Irfan Alam", "Ak Akash Chillar", "Shiva Yadav"],
   "FWU - 2": ["Narayan Pawar", "Sudhir Mokal", "Ganesh Chavan", "Snehalata Yevrikar", "Pooja Waghmare", "Shankar Jadhav", "Chetan Vagade", "Sagar Gaikwad", "Ajay Bhore", "Manoj Patil", "Rushikesh Davari", "Omkar Gavade", "Sagar Mane", "Shree Bhosale", "Suraj Jagdale", "Rakesh Sonawane", "Indra Gaikwad", "Prashant Koli", "Omkar Ghag", "Vaibhav Salgar", "Harshat Kurewar", "Prathamesh Ganeshkar", "Ashwini Rathod", "Namdev Khavare", "Adhikrao Ingale", "Yogesh Raskar", "Keshav Khot", "Sameer Patil", "Tushar Shikhare", "Suraj Pachumbre", "Pralhad Barhate", "Tanmay Kale", "Shashikant Kamble", "Suraj Patil", "Indrajit Patil", "Vishal Markal", "Geeta Patel"],
+  "PDX": ["Nikhil Gaikwad", "Amol Shelke", "Mahesh Jantre", "Narendra Raut", "Deepak Gaikar", "Trushank Tambe", "Pravin Raut", "Sameer Gage", "Suraj Kamble", "Parmeshwar Jedhe", "Surjeet Sah", "Swati Jadhav", "Dnyaneshwar Shinde", "Ritesh Zope", "Nishikant Gondhale", "Nilesh Kurwade", "Tanuja Jagdane", "Pallavi Fagare", "Sujit Dongare", "Rupesh Gharat", "Pratik Salunkhe", "Ajay Yadav", "Subhash Patil", "Yogesh Dhuware", "Nilesh Naik", "Pandurang Pisal", "Raghunath Thakare", "Nitin Sonawane", "Dharmesh Savaji", "Jai Bhoir", "Ajay Mirkute", "Kundlik Padir", "Gaurav Kharat", "Arati Archana", "Vaibhav Rakhonde", "Kishor Pawar", "Altaf Shaha", "Sandip Davari", "Pallavi Patil", "Shruti Dhande", "Svaraj Gaykwad", "Akash Kurhekar", "Hanumant Gaikwad", "Rahul Mali", "Raviraj Bhate", "Vinayak Magdum"],
   "PDX 2 / 3 BAY": ["Nikhil Gaikwad", "Amol Shelke", "Mahesh Jantre", "Narendra Raut", "Deepak Gaikar", "Trushank Tambe", "Pravin Raut", "Sameer Gage", "Suraj Kamble", "Parmeshwar Jedhe", "Surjeet Sah", "Swati Jadhav", "Dnyaneshwar Shinde", "Ritesh Zope", "Nishikant Gondhale", "Nilesh Kurwade", "Tanuja Jagdane", "Pallavi Fagare", "Sujit Dongare", "Rupesh Gharat", "Pratik Salunkhe", "Ajay Yadav", "Subhash Patil", "Yogesh Dhuware"],
   "PDX 1 / 1.5 BAY": ["Nilesh Naik", "Pandurang Pisal", "Raghunath Thakare", "Nitin Sonawane", "Dharmesh Savaji", "Jai Bhoir", "Ajay Mirkute", "Kundlik Padir", "Gaurav Kharat", "Arati Archana", "Vaibhav Rakhonde", "Kishor Pawar", "Altaf Shaha", "Sandip Davari", "Pallavi Patil", "Shruti Dhande", "Svaraj Gaykwad", "Akash Kurhekar", "Hanumant Gaikwad", "Rahul Mali", "Raviraj Bhate", "Vinayak Magdum"],
   "Li7": ["NILESH SHELKE", "HITESH SHARMA", "NIKHIL MHATRE", "SHEKHAR DHULE", "ARSLAM SHAIKH", "JAYESH SHINGTE", "RIDDESH BHOPI", "RAMAKANT MHATRE", "VISHAL PATIL"],

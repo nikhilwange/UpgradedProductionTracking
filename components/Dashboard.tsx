@@ -20,6 +20,15 @@ const Dashboard: React.FC<DashboardProps> = ({ entries, plant, userRole }) => {
 
   const isGlobal = userRole === 'admin' || userRole === 'management';
 
+  const normalizedEntries = useMemo(() => {
+    return entries.map(e => {
+      const m = e.model.toUpperCase();
+      if (m === 'NH') return { ...e, model: 'CHILLER' };
+      if (m === 'CH' || m === 'DSE') return { ...e, model: 'PDX' };
+      return e;
+    });
+  }, [entries]);
+
   const toTitleCase = (str: string) => {
     if (!str) return 'N/A';
     return str.toLowerCase().split(' ').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
@@ -42,12 +51,12 @@ const Dashboard: React.FC<DashboardProps> = ({ entries, plant, userRole }) => {
 
   // 1. Filtered entries based on selected Plant and Model
   const filteredEntries = useMemo(() => {
-    return entries.filter(e => {
+    return normalizedEntries.filter(e => {
       const plantMatch = selectedPlantFilter === 'All' || e.plant === selectedPlantFilter;
       const modelMatch = selectedModelFilter === 'All' || e.model === selectedModelFilter;
       return plantMatch && modelMatch;
     });
-  }, [entries, selectedPlantFilter, selectedModelFilter]);
+  }, [normalizedEntries, selectedPlantFilter, selectedModelFilter]);
 
   const stats = useMemo(() => {
     if (!filteredEntries.length) return null;
@@ -82,7 +91,7 @@ const Dashboard: React.FC<DashboardProps> = ({ entries, plant, userRole }) => {
       activeActivity?: string;
     }> = {};
 
-    entries.forEach(e => {
+    normalizedEntries.forEach(e => {
       if (!units[e.serialNo]) {
         units[e.serialNo] = { 
           serialNo: e.serialNo, 
@@ -118,17 +127,17 @@ const Dashboard: React.FC<DashboardProps> = ({ entries, plant, userRole }) => {
   }, [unitsList, selectedPlantFilter, selectedModelFilter]);
 
   const availablePlants = useMemo(() => {
-    const plants = new Set(entries.map(e => e.plant));
+    const plants = new Set(normalizedEntries.map(e => e.plant));
     plants.add('CHAKAN');
     plants.add('AMBERNATH');
     return ['All', ...Array.from(plants).sort()];
-  }, [entries]);
+  }, [normalizedEntries]);
 
   const availableModels = useMemo(() => {
     const models = new Set<string>();
     
-    // 1. Add models that have actual data
-    const relevantEntries = entries.filter(e => selectedPlantFilter === 'All' || e.plant === selectedPlantFilter);
+    // 1. Add models from normalized data
+    const relevantEntries = normalizedEntries.filter(e => selectedPlantFilter === 'All' || e.plant === selectedPlantFilter);
     relevantEntries.forEach(e => {
       const m = e.model.toUpperCase();
       if (m === 'LI7') models.add('Li7');

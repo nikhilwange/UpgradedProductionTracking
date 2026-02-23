@@ -124,13 +124,13 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
 
   const filteredProductLines = useMemo(() => {
     const p = plant?.toUpperCase();
-    // For Ambernath, product lines include Li7, Li7 PCA, Trinergy, 2X, 3X, and STS
+    // For Ambernath, product lines are Li7, Li7 PCA, and Trinergy
     if (p === 'AMBERNATH') {
-      return ['Li7', 'Li7 PCA', 'Trinergy', '2X', '3X', 'STS'];
+      return ['Li7', 'Li7 PCA', 'Trinergy'];
     }
     // For Chakan, exclude Ambernath specific lines
     return PRODUCT_LINES_LIST.filter(pl => 
-      !['Li7', 'Li7 PCA', 'Trinergy', '2X', '3X', 'STS'].includes(pl)
+      !['Li7', 'Li7 PCA', 'Trinergy'].includes(pl)
     );
   }, [plant]);
 
@@ -140,7 +140,9 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
   // Sync product line with model for Ambernath specific models
   useEffect(() => {
     if (plant?.toUpperCase() === 'AMBERNATH') {
-      if (['2X', '3X', 'STS', 'Li7', 'Li7 PCA'].includes(model)) {
+      if (['2X', '3X', 'STS'].includes(model)) {
+        setProductLine('Trinergy');
+      } else if (['Li7', 'Li7 PCA', 'Trinergy'].includes(model)) {
         setProductLine(model);
       }
     }
