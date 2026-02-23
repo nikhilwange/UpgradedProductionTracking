@@ -214,7 +214,8 @@ const App: React.FC = () => {
       let query = supabase
         .from('production_entries')
         .select('*')
-        .order('created_at', { ascending: false });
+        .order('production_date', { ascending: true })
+        .order('start_time', { ascending: true });
 
       // DATA ISOLATION LOGIC:
       // Admins AND Management users can see cross-plant data (Global Viewers).

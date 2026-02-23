@@ -117,25 +117,34 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
   const [showSuccessOverlay, setShowSuccessOverlay] = useState(false);
   
   const filteredModels = useMemo(() => {
-    const modelsWithData = new Set(entries.filter(e => e.plant === plant).map(e => e.model.toUpperCase()));
-    
-    if (plant === 'AMBERNATH') {
-      return MODELS_LIST.filter(m => (m === 'Li7' || m === 'LI7' || m === 'Li7 PCA') && modelsWithData.has(m.toUpperCase()));
-    }
-    return MODELS_LIST.filter(m => m !== 'Li7' && m !== 'LI7' && m !== 'Li7 PCA' && modelsWithData.has(m.toUpperCase()));
-  }, [plant, entries]);
+    const p = plant?.toUpperCase();
+    if (!p || !PLANT_REGISTRY[p]) return [];
+    return Object.keys(PLANT_REGISTRY[p].models);
+  }, [plant]);
 
   const filteredProductLines = useMemo(() => {
-    const plWithData = new Set(entries.filter(e => e.plant === plant).map(e => e.productLine.toUpperCase()));
-
-    if (plant === 'AMBERNATH') {
-      return PRODUCT_LINES_LIST.filter(pl => (pl === 'Li7' || pl === 'LI7' || pl === 'Li7 PCA') && plWithData.has(pl.toUpperCase()));
+    const p = plant?.toUpperCase();
+    // For Ambernath, product lines include Li7, Li7 PCA, Trinergy, 2X, 3X, and STS
+    if (p === 'AMBERNATH') {
+      return ['Li7', 'Li7 PCA', 'Trinergy', '2X', '3X', 'STS'];
     }
-    return PRODUCT_LINES_LIST.filter(pl => pl !== 'Li7' && pl !== 'LI7' && pl !== 'Li7 PCA' && plWithData.has(pl.toUpperCase()));
-  }, [plant, entries]);
+    // For Chakan, exclude Ambernath specific lines
+    return PRODUCT_LINES_LIST.filter(pl => 
+      !['Li7', 'Li7 PCA', 'Trinergy', '2X', '3X', 'STS'].includes(pl)
+    );
+  }, [plant]);
 
   const [model, setModel] = useState('');
   const [productLine, setProductLine] = useState('');
+
+  // Sync product line with model for Ambernath specific models
+  useEffect(() => {
+    if (plant?.toUpperCase() === 'AMBERNATH') {
+      if (['2X', '3X', 'STS', 'Li7', 'Li7 PCA'].includes(model)) {
+        setProductLine(model);
+      }
+    }
+  }, [model, plant]);
 
   useEffect(() => {
     if (filteredModels.length > 0 && !filteredModels.includes(model)) {
@@ -148,6 +157,20 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
       setProductLine(filteredProductLines[0]);
     }
   }, [filteredProductLines, productLine]);
+
+  // Auto-select product line based on model for Ambernath
+  useEffect(() => {
+    if (plant === 'AMBERNATH' && model) {
+      const m = model.toUpperCase();
+      if (['2X', '3X', 'STS'].includes(m)) {
+        setProductLine('Trinergy');
+      } else if (m === 'LI7') {
+        setProductLine('Li7');
+      } else if (m === 'LI7 PCA') {
+        setProductLine('Li7 PCA');
+      }
+    }
+  }, [model, plant]);
 
   const [activeInProgressEntry, setActiveInProgressEntry] = useState<ProductionEntry | null>(null);
   const [isScanning, setIsScanning] = useState<'scan' | null>(null);
@@ -235,13 +258,13 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
 
   const activeBreaks = useMemo(() => {
     const m = model.toUpperCase();
-    if (m === 'LI7' || m === 'LI7 PCA') return AMBERNATH_BREAK_TIMES;
+    if (m === 'LI7' || m === 'LI7 PCA' || m === '2X' || m === '3X' || m === 'STS') return AMBERNATH_BREAK_TIMES;
     return BREAK_TIMES;
   }, [model]);
 
   const activeShiftBoundaries = useMemo(() => {
     const m = model.toUpperCase();
-    if (m === 'LI7' || m === 'LI7 PCA') {
+    if (m === 'LI7' || m === 'LI7 PCA' || m === '2X' || m === '3X' || m === 'STS') {
       const nonWorking = AMBERNATH_BREAK_TIMES.find(b => b.name === 'Non Working Hours');
       if (nonWorking) {
         return {
@@ -670,8 +693,12 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
   
   const availableOperators = useMemo(() => {
     if (!productLine || !model) return [];
+    // For Ambernath, prefer model lookup to ensure correct operator list
+    if (plant?.toUpperCase() === 'AMBERNATH') {
+      return OPERATORS_BY_MODEL_LINE[model] || OPERATORS_BY_MODEL_LINE[productLine] || [];
+    }
     return OPERATORS_BY_MODEL_LINE[productLine] || OPERATORS_BY_MODEL_LINE[model] || [];
-  }, [model, productLine]);
+  }, [model, productLine, plant]);
 
   return (
     <div className="max-w-6xl mx-auto py-4">

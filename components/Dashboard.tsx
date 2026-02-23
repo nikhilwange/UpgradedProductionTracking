@@ -125,15 +125,36 @@ const Dashboard: React.FC<DashboardProps> = ({ entries, plant, userRole }) => {
   }, [entries]);
 
   const availableModels = useMemo(() => {
-    const relevantEntries = entries.filter(e => selectedPlantFilter === 'All' || e.plant === selectedPlantFilter);
-    const models = new Set(relevantEntries.map(e => {
-      const m = e.model.toUpperCase();
-      if (m === 'LI7') return 'Li7';
-      if (m === 'LI7 PCA') return 'Li7 PCA';
-      return e.model;
-    }));
+    const models = new Set<string>();
     
-    const list = Array.from(models).sort();
+    // 1. Add models that have actual data
+    const relevantEntries = entries.filter(e => selectedPlantFilter === 'All' || e.plant === selectedPlantFilter);
+    relevantEntries.forEach(e => {
+      const m = e.model.toUpperCase();
+      if (m === 'LI7') models.add('Li7');
+      else if (m === 'LI7 PCA') models.add('Li7 PCA');
+      else if (m === '2X') models.add('2X');
+      else if (m === '3X') models.add('3X');
+      else if (m === 'STS') models.add('STS');
+      else models.add(e.model);
+    });
+
+    // 2. If a specific plant is selected, ensure all its registry models are available
+    const p = selectedPlantFilter?.toUpperCase();
+    if (p !== 'ALL' && PLANT_REGISTRY[p]) {
+      Object.keys(PLANT_REGISTRY[p].models).forEach(m => models.add(m));
+    }
+    
+    const list = Array.from(models).sort((a, b) => {
+      const order = ['2X', '3X', 'STS', 'Li7', 'Li7 PCA'];
+      const idxA = order.indexOf(a);
+      const idxB = order.indexOf(b);
+      
+      if (idxA !== -1 && idxB !== -1) return idxA - idxB;
+      if (idxA !== -1) return -1;
+      if (idxB !== -1) return 1;
+      return a.localeCompare(b);
+    });
     return ['All', ...list];
   }, [entries, selectedPlantFilter]);
 
@@ -167,12 +188,20 @@ const Dashboard: React.FC<DashboardProps> = ({ entries, plant, userRole }) => {
 
   const pipelineActivities = useMemo(() => {
     const m = selectedModelFilter.toUpperCase();
-    if (m === 'LI7') {
-      return Object.values(PLANT_REGISTRY.AMBERNATH.models.Li7.mapping).flat() as string[];
+    if (m === 'ALL') return ACTIVITIES_LIST;
+
+    // Search for model in PLANT_REGISTRY
+    const plants = Object.keys(PLANT_REGISTRY);
+    for (const pKey of plants) {
+      const plantData = PLANT_REGISTRY[pKey as keyof typeof PLANT_REGISTRY];
+      const modelKeys = Object.keys(plantData.models);
+      const foundKey = modelKeys.find(k => k.toUpperCase() === m);
+      if (foundKey) {
+        const modelConfig = (plantData.models as any)[foundKey];
+        return Object.values(modelConfig.mapping).flat() as string[];
+      }
     }
-    if (m === 'LI7 PCA') {
-      return Object.values(PLANT_REGISTRY.AMBERNATH.models["Li7 PCA"].mapping).flat() as string[];
-    }
+
     // For general/mixed pipeline, use the Chakan NH baseline
     return ACTIVITIES_LIST;
   }, [selectedModelFilter]);
@@ -198,40 +227,35 @@ const Dashboard: React.FC<DashboardProps> = ({ entries, plant, userRole }) => {
         return timeA - timeB;
       });
 
-    const groups: Record<string, ProductionEntry[]> = {};
+    // Group consecutive entries of the same activity into "sessions"
+    const consolidated: any[] = [];
     prodEntries.forEach(e => {
-      if (!groups[e.activity]) groups[e.activity] = [];
-      groups[e.activity].push(e);
+      const startMs = new Date(`${e.productionDate}T${e.startTime}`).getTime();
+      const endMs = e.status === 'Completed' 
+        ? new Date(`${e.endDate || e.productionDate}T${e.endTime}`).getTime()
+        : Date.now();
+
+      const lastGroup = consolidated[consolidated.length - 1];
+      if (lastGroup && lastGroup.activityName === e.activity) {
+        lastGroup.shifts.push(e);
+        lastGroup.startMs = Math.min(lastGroup.startMs, startMs);
+        lastGroup.endMs = Math.max(lastGroup.endMs, endMs);
+        if (endMs >= lastGroup.endMs) {
+          lastGroup.endTime = e.status === 'Completed' ? e.endTime : '-';
+        }
+      } else {
+        consolidated.push({
+          activityName: e.activity,
+          shifts: [e],
+          startMs,
+          endMs,
+          startTime: e.startTime,
+          endTime: e.status === 'Completed' ? e.endTime : '-',
+          date: e.productionDate,
+          isParallel: false
+        });
+      }
     });
-
-    const consolidated = Object.entries(groups).map(([activityName, shifts]) => {
-      const sortedShifts = [...shifts].sort((a, b) => {
-        const tA = new Date(`${a.productionDate}T${a.startTime}`).getTime();
-        const tB = new Date(`${b.productionDate}T${b.startTime}`).getTime();
-        return tA - tB;
-      });
-      
-      const first = sortedShifts[0];
-      const last = sortedShifts[sortedShifts.length - 1];
-      
-      const startMs = new Date(`${first.productionDate}T${first.startTime}`).getTime();
-      const endMs = last.status === 'Completed' 
-        ? new Date(`${last.endDate || last.productionDate}T${last.endTime}`).getTime()
-        : Date.now(); // If not completed, end is 'now' for duration calculation if needed
-
-      return {
-        activityName,
-        shifts: sortedShifts,
-        startMs,
-        endMs,
-        startTime: first.startTime,
-        endTime: last.status === 'Completed' ? last.endTime : '-',
-        date: first.productionDate,
-        isParallel: false
-      };
-    });
-
-    consolidated.sort((a, b) => a.startMs - b.startMs);
 
     const nodes: any[] = [];
     let absoluteLatestEndMs = -Infinity;
@@ -242,7 +266,7 @@ const Dashboard: React.FC<DashboardProps> = ({ entries, plant, userRole }) => {
       if (idx > 0 && group.startMs > absoluteLatestEndMs && absoluteLatestEndMs !== -Infinity) {
         // EXCLUSION LOGIC: Use the shared helper to calculate available working minutes only
         const m = selectedModelFilter.toUpperCase();
-        const customBreaks = (m === 'LI7' || m === 'LI7 PCA') ? AMBERNATH_BREAK_TIMES : undefined;
+        const customBreaks = (m === 'LI7' || m === 'LI7 PCA' || m === '2X' || m === '3X' || m === 'STS') ? AMBERNATH_BREAK_TIMES : undefined;
         const workingGapMins = calculateAvailableMinutes(absoluteLatestEndMs, group.startMs, customBreaks);
         
         if (workingGapMins >= 1) {
@@ -258,7 +282,21 @@ const Dashboard: React.FC<DashboardProps> = ({ entries, plant, userRole }) => {
 
       for (let j = 0; j < idx; j++) {
         const prev = consolidated[j];
+        // Parallel logic: Overlap in time + different activity names
         if (group.startMs < prev.endMs && group.activityName !== prev.activityName) {
+          // STALE IN-PROGRESS CHECK:
+          // If the previous activity is stuck 'In Progress' (endMs is 'Now'), 
+          // but the current activity has already started much later (e.g., different day),
+          // we should not mark it as parallel unless they truly overlap.
+          const prevIsInProgress = prev.shifts.some((s: any) => s.status === 'In Progress');
+          const groupIsNewer = group.startMs > prev.startMs;
+          
+          if (prevIsInProgress && groupIsNewer) {
+            // If group started on a different day than prev started, and prev is still In Progress,
+            // we assume it's a stale entry and not a parallel activity.
+            if (group.date !== prev.date) continue;
+          }
+
           group.isParallel = true;
           break;
         }
@@ -292,6 +330,9 @@ const Dashboard: React.FC<DashboardProps> = ({ entries, plant, userRole }) => {
     
     if (modelToUse === 'LI7') return PLANT_REGISTRY.AMBERNATH.models.Li7.standards;
     if (modelToUse === 'LI7 PCA') return PLANT_REGISTRY.AMBERNATH.models["Li7 PCA"].standards;
+    if (modelToUse === '2X') return PLANT_REGISTRY.AMBERNATH.models["2X"].standards;
+    if (modelToUse === '3X') return PLANT_REGISTRY.AMBERNATH.models["3X"].standards;
+    if (modelToUse === 'STS') return PLANT_REGISTRY.AMBERNATH.models["STS"].standards;
     if (modelToUse === 'NH') return PLANT_REGISTRY.CHAKAN.models.NH.standards;
     if (modelToUse === 'CH') return PLANT_REGISTRY.CHAKAN.models.CH.standards;
     if (modelToUse === 'DSE') return PLANT_REGISTRY.CHAKAN.models.DSE.standards;
@@ -469,7 +510,13 @@ const Dashboard: React.FC<DashboardProps> = ({ entries, plant, userRole }) => {
             </div>
           </div>
           <div className="relative overflow-x-auto pb-4 custom-scrollbar">
-            <div className={`flex items-start gap-0 px-4 ${(selectedModelFilter.toUpperCase() === 'LI7' || selectedModelFilter.toUpperCase() === 'LI7 PCA') ? 'min-w-[1200px]' : 'min-w-[2500px]'}`}>
+            <div className={`flex items-start gap-0 px-4 ${
+              (['2X', '3X'].includes(selectedModelFilter.toUpperCase())) 
+                ? 'min-w-[2000px]' 
+                : (['LI7', 'LI7 PCA', 'STS'].includes(selectedModelFilter.toUpperCase()))
+                  ? 'min-w-[1200px]'
+                  : 'min-w-[2500px]'
+            }`}>
               {pipelineActivities.map((act, idx) => {
                 const activeUnits = Object.entries(activePipelines)
                   .filter(([_, data]: [string, any]) => {

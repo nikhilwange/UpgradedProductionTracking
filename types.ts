@@ -44,6 +44,7 @@ export interface ProductionEntry {
   createdAt: string; 
   userEmail?: string;
   isGap?: boolean; 
+  isParallel?: boolean;
   // Snake case aliases for database compatibility
   serial_no?: string;
   unit_sr_no?: string;

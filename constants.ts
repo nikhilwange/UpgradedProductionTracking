@@ -102,6 +102,91 @@ const AMBERNATH_LI7_PCA_ACTIVITY_STANDARDS: Record<string, number> = {
   "Testing": 55
 };
 
+// --- 2X Configuration for Ambernath ---
+const AMBERNATH_2X_STAGE_MAPPING: Record<string, string[]> = {
+  "Loading": ["Frame Movement and Sheet Metal, Material Loading"],
+  "Core Assembly and Integration": [
+    "Mounting of Contactor Assembly, Routing & Wiring",
+    "Mounting of Resistor Shelf, PIB Board and Fan Tray Assembly",
+    "Mounting of DC Choke and DC Cap and its Wiring",
+    "Mounting of AC Inductor and wiring",
+    "Module Insertion Inverter, Rectifier, Booster LHS, Booster RHS",
+    "Stacked Busbar Mounting and Connection, 7 Types Fuse Insertion and wiring"
+  ],
+  "Busbar Assembly": ["Rear Side Busbar Assembly"],
+  "Testing": ["Connection/Disconnection", "Functional Testing", "Burn-In"],
+  "Finishing": ["Finishing"]
+};
+
+const AMBERNATH_2X_ACTIVITY_STANDARDS: Record<string, number> = {
+  "Frame Movement and Sheet Metal, Material Loading": 60,
+  "Mounting of Contactor Assembly, Routing & Wiring": 480,
+  "Mounting of Resistor Shelf, PIB Board and Fan Tray Assembly": 720,
+  "Mounting of DC Choke and DC Cap and its Wiring": 360,
+  "Mounting of AC Inductor and wiring": 360,
+  "Module Insertion Inverter, Rectifier, Booster LHS, Booster RHS": 288,
+  "Stacked Busbar Mounting and Connection, 7 Types Fuse Insertion and wiring": 288,
+  "Rear Side Busbar Assembly": 240,
+  "Connection/Disconnection": 90,
+  "Functional Testing": 690,
+  "Burn-In": 390,
+  "Finishing": 480
+};
+
+// --- 3X Configuration for Ambernath ---
+const AMBERNATH_3X_STAGE_MAPPING: Record<string, string[]> = {
+  "Loading": ["Frame Movement and Sheet Metal, Material Loading"],
+  "Core Assembly and Integration": [
+    "Mounting of Contactor Assembly, Routing & Wiring",
+    "Mounting of Resistor Shelf, PIB Board and Fan Tray Assembly",
+    "Mounting of DC Choke and DC Cap and its Wiring",
+    "Mounting of AC Inductor and Wiring",
+    "Module Insertion Inverter, Rectifier, Booster LHS, Booster RHS",
+    "Stacked Busbar Mounting and Connection, 7 Types Fuse Insertion and wiring"
+  ],
+  "Busbar Assembly": ["Rear Side Busbar Assembly"],
+  "Testing": ["Connection/Disconnection", "Functional Testing", "Burn-In"],
+  "Finishing": ["Finishing Activity"]
+};
+
+const AMBERNATH_3X_ACTIVITY_STANDARDS: Record<string, number> = {
+  "Frame Movement and Sheet Metal, Material Loading": 90,
+  "Mounting of Contactor Assembly, Routing & Wiring": 720,
+  "Mounting of Resistor Shelf, PIB Board and Fan Tray Assembly": 1080,
+  "Mounting of DC Choke and DC Cap and its Wiring": 540,
+  "Mounting of AC Inductor and Wiring": 540,
+  "Module Insertion Inverter, Rectifier, Booster LHS, Booster RHS": 432,
+  "Stacked Busbar Mounting and Connection, 7 Types Fuse Insertion and wiring": 432,
+  "Rear Side Busbar Assembly": 240,
+  "Connection/Disconnection": 120,
+  "Functional Testing": 1065,
+  "Burn-In": 465,
+  "Finishing Activity": 480
+};
+
+// --- STS Configuration for Ambernath ---
+const AMBERNATH_STS_STAGE_MAPPING: Record<string, string[]> = {
+  "Loading": ["Frame Movement and Sheet Metal, Material Loading"],
+  "STS Assembly and Integration": [
+    "Component Mounting, Labeling",
+    "Wiring",
+    "Busbar Assembly",
+    "Fan Mounting, Heat Sink Assembly Mounting"
+  ],
+  "Testing": ["Connection/Disconnection, Functional Testing, Burn-In"],
+  "Finishing": ["Finishing"]
+};
+
+const AMBERNATH_STS_ACTIVITY_STANDARDS: Record<string, number> = {
+  "Frame Movement and Sheet Metal, Material Loading": 30,
+  "Component Mounting, Labeling": 480,
+  "Wiring": 1080,
+  "Busbar Assembly": 1620,
+  "Fan Mounting, Heat Sink Assembly Mounting": 480,
+  "Connection/Disconnection, Functional Testing, Burn-In": 450,
+  "Finishing": 300
+};
+
 // --- Master Plant Config Registry ---
 
 export const PLANT_REGISTRY: Record<string, any> = {
@@ -130,6 +215,18 @@ export const PLANT_REGISTRY: Record<string, any> = {
       "Li7 PCA": {
         mapping: AMBERNATH_LI7_PCA_STAGE_MAPPING,
         standards: AMBERNATH_LI7_PCA_ACTIVITY_STANDARDS
+      },
+      "2X": {
+        mapping: AMBERNATH_2X_STAGE_MAPPING,
+        standards: AMBERNATH_2X_ACTIVITY_STANDARDS
+      },
+      "3X": {
+        mapping: AMBERNATH_3X_STAGE_MAPPING,
+        standards: AMBERNATH_3X_ACTIVITY_STANDARDS
+      },
+      "STS": {
+        mapping: AMBERNATH_STS_STAGE_MAPPING,
+        standards: AMBERNATH_STS_ACTIVITY_STANDARDS
       }
     }
   }
@@ -146,6 +243,16 @@ export const getModelContext = (serialNo: string, model: string, currentPlant?: 
       return { plant: "AMBERNATH", type: "Li7 PCA", ...PLANT_REGISTRY.AMBERNATH.models["Li7 PCA"] };
     }
     return { plant: "AMBERNATH", type: "Li7", ...PLANT_REGISTRY.AMBERNATH.models.Li7 };
+  }
+
+  if (m === '2X' || m.includes('2X')) {
+    return { plant: "AMBERNATH", type: "2X", ...PLANT_REGISTRY.AMBERNATH.models["2X"] };
+  }
+  if (m === '3X' || m.includes('3X')) {
+    return { plant: "AMBERNATH", type: "3X", ...PLANT_REGISTRY.AMBERNATH.models["3X"] };
+  }
+  if (m === 'STS' || m.includes('STS')) {
+    return { plant: "AMBERNATH", type: "STS", ...PLANT_REGISTRY.AMBERNATH.models["STS"] };
   }
 
   // Logic to determine plant and model sub-type
@@ -168,11 +275,11 @@ export const ACTIVITY_STANDARDS = CHAKAN_NH_ACTIVITY_STANDARDS; // Legacy compat
 export const STAGES_LIST = Object.keys(CHAKAN_NH_STAGE_MAPPING);
 
 export const PRODUCT_LINES_LIST = [
-  "PDX 1 / 1.5 BAY", "SCU", "PDX 2 / 3 BAY", "PCW 1 / 2 BAY", "PCW 3 / 4 BAY", "FAN ASSEMBLY", "CHILLER", "CHILLER 1", "CHILLER 2", "FWU - 1", "FWU - 2", "FWU - 3", "DSE", "CRV/CRV+", "PKDX", "Li7", "Li7 PCA"
+  "PDX 1 / 1.5 BAY", "SCU", "PDX 2 / 3 BAY", "PCW 1 / 2 BAY", "PCW 3 / 4 BAY", "FAN ASSEMBLY", "CHILLER", "CHILLER 1", "CHILLER 2", "FWU - 1", "FWU - 2", "FWU - 3", "DSE", "CRV/CRV+", "PKDX", "Li7", "Li7 PCA", "Trinergy"
 ];
 
 export const MODELS_LIST = [
-  "PDX", "PCW", "PNW", "CRV", "CRV+", "SCU", "DME", "CHILLER", "VANTAGE", "PKDX", "FWU", "DSE INDOOR", "DSE OUTDOOR", "Li7", "Li7 PCA"
+  "PDX", "PCW", "PNW", "CRV", "CRV+", "SCU", "DME", "CHILLER", "VANTAGE", "PKDX", "FWU", "DSE INDOOR", "DSE OUTDOOR", "Li7", "Li7 PCA", "2X", "3X", "STS"
 ];
 
 export const SERIAL_NUMBERS_LIST = [
@@ -192,8 +299,12 @@ export const OPERATORS_BY_MODEL_LINE: Record<string, string[]> = {
   "FWU - 2": ["Narayan Pawar", "Sudhir Mokal", "Ganesh Chavan", "Snehalata Yevrikar", "Pooja Waghmare", "Shankar Jadhav", "Chetan Vagade", "Sagar Gaikwad", "Ajay Bhore", "Manoj Patil", "Rushikesh Davari", "Omkar Gavade", "Sagar Mane", "Shree Bhosale", "Suraj Jagdale", "Rakesh Sonawane", "Indra Gaikwad", "Prashant Koli", "Omkar Ghag", "Vaibhav Salgar", "Harshat Kurewar", "Prathamesh Ganeshkar", "Ashwini Rathod", "Namdev Khavare", "Adhikrao Ingale", "Yogesh Raskar", "Keshav Khot", "Sameer Patil", "Tushar Shikhare", "Suraj Pachumbre", "Pralhad Barhate", "Tanmay Kale", "Shashikant Kamble", "Suraj Patil", "Indrajit Patil", "Vishal Markal", "Geeta Patel"],
   "PDX 2 / 3 BAY": ["Nikhil Gaikwad", "Amol Shelke", "Mahesh Jantre", "Narendra Raut", "Deepak Gaikar", "Trushank Tambe", "Pravin Raut", "Sameer Gage", "Suraj Kamble", "Parmeshwar Jedhe", "Surjeet Sah", "Swati Jadhav", "Dnyaneshwar Shinde", "Ritesh Zope", "Nishikant Gondhale", "Nilesh Kurwade", "Tanuja Jagdane", "Pallavi Fagare", "Sujit Dongare", "Rupesh Gharat", "Pratik Salunkhe", "Ajay Yadav", "Subhash Patil", "Yogesh Dhuware"],
   "PDX 1 / 1.5 BAY": ["Nilesh Naik", "Pandurang Pisal", "Raghunath Thakare", "Nitin Sonawane", "Dharmesh Savaji", "Jai Bhoir", "Ajay Mirkute", "Kundlik Padir", "Gaurav Kharat", "Arati Archana", "Vaibhav Rakhonde", "Kishor Pawar", "Altaf Shaha", "Sandip Davari", "Pallavi Patil", "Shruti Dhande", "Svaraj Gaykwad", "Akash Kurhekar", "Hanumant Gaikwad", "Rahul Mali", "Raviraj Bhate", "Vinayak Magdum"],
-  "Li7": ["Amit Shinde", "Sagar Patil", "Rahul More", "Vikas Jadhav", "Prakash Koli"],
-  "Li7 PCA": ["Amit Shinde", "Sagar Patil", "Rahul More", "Vikas Jadhav", "Prakash Koli"]
+  "Li7": ["NILESH SHELKE", "HITESH SHARMA", "NIKHIL MHATRE", "SHEKHAR DHULE", "ARSLAM SHAIKH", "JAYESH SHINGTE", "RIDDESH BHOPI", "RAMAKANT MHATRE", "VISHAL PATIL"],
+  "Li7 PCA": ["NILESH SHELKE", "HITESH SHARMA", "NIKHIL MHATRE", "SHEKHAR DHULE", "ARSLAM SHAIKH", "JAYESH SHINGTE", "RIDDESH BHOPI", "RAMAKANT MHATRE", "VISHAL PATIL"],
+  "2X": ["Amit Ahirwar", "Yash Perane", "Prasad Lukare", "Ajay Shirke", "Mayur Sonawale", "Ganesh Chinchgharkar", "Prashant Jadhav", "Rahul Jamghare", "Gunvant Shende", "Subodh Hardikar", "Sandeep Pashte"],
+  "3X": ["Amit Ahirwar", "Yash Perane", "Prasad Lukare", "Ajay Shirke", "Mayur Sonawale", "Ganesh Chinchgharkar", "Prashant Jadhav", "Rahul Jamghare", "Gunvant Shende", "Subodh Hardikar", "Sandeep Pashte"],
+  "STS": ["DHIRAJ SONAWANE", "AJIT THOMBRE", "NISHANT MALI", "SHRIRAM THIGALE", "ROSHAN BHOYE", "SAMADHAN BHOIR", "PRASAD SHENDE", "ARIF SHAIKH", "SAGAR PARADHI", "BHAVESH PATIL", "CHANDRAKANT HANI", "SAURABH MARADE", "DEEP DHUMAL", "MANDAR LUBDE", "SWAPNIL ZUZAM", "SAGAR PATIL", "ADITYA SONAWALE", "SAHIL RAWUL"],
+  "Trinergy": ["NILESH SHELKE", "HITESH SHARMA", "NIKHIL MHATRE", "SHEKHAR DHULE", "ARSLAM SHAIKH", "JAYESH SHINGTE", "RIDDESH BHOPI", "RAMAKANT MHATRE", "VISHAL PATIL"]
 };
 
 export const LOSS_PARAMETER_MAPPING: Record<string, string[]> = {
