@@ -53,7 +53,17 @@ const Dashboard: React.FC<DashboardProps> = ({ entries, plant, userRole }) => {
   const filteredEntries = useMemo(() => {
     return normalizedEntries.filter(e => {
       const plantMatch = selectedPlantFilter === 'All' || e.plant === selectedPlantFilter;
-      const modelMatch = selectedModelFilter === 'All' || e.model === selectedModelFilter;
+      
+      let modelMatch = false;
+      if (selectedModelFilter === 'All') {
+        modelMatch = true;
+      } else if (selectedModelFilter === 'CHILLER') {
+        // Group NH, CH, and ADANI under the "CHILLER" filter
+        modelMatch = ['CHILLER_NH', 'CHILLER_CH', 'CHILLER_ADANI', 'CHILLER'].includes(e.model.toUpperCase());
+      } else {
+        modelMatch = e.model.toUpperCase() === selectedModelFilter.toUpperCase();
+      }
+      
       return plantMatch && modelMatch;
     });
   }, [normalizedEntries, selectedPlantFilter, selectedModelFilter]);
@@ -64,7 +74,12 @@ const Dashboard: React.FC<DashboardProps> = ({ entries, plant, userRole }) => {
     const totalManhours = filteredEntries.reduce((acc, e) => acc + e.manhoursEngaged, 0);
     const avgVariance = filteredEntries.reduce((acc, e) => acc + e.variance, 0) / (filteredEntries.length || 1);
     const totalLoss = filteredEntries.reduce((acc, e) => acc + e.lossHours, 0);
-    return { uniqueUnits, totalManhours, avgVariance, totalLoss };
+    return { 
+      uniqueUnits, 
+      totalManhours: Number(totalManhours.toFixed(2)), 
+      avgVariance: Number(avgVariance.toFixed(2)), 
+      totalLoss: Number(totalLoss.toFixed(2)) 
+    };
   }, [filteredEntries]);
 
   // Helper to determine active activity for a set of entries
@@ -145,13 +160,18 @@ const Dashboard: React.FC<DashboardProps> = ({ entries, plant, userRole }) => {
       else if (m === '2X') models.add('2X');
       else if (m === '3X') models.add('3X');
       else if (m === 'STS') models.add('STS');
+      else if (['CHILLER_NH', 'CHILLER_CH', 'CHILLER_ADANI', 'CHILLER'].includes(m)) models.add('CHILLER');
       else models.add(e.model);
     });
 
     // 2. If a specific plant is selected, ensure all its registry models are available
     const p = selectedPlantFilter?.toUpperCase();
     if (p !== 'ALL' && PLANT_REGISTRY[p]) {
-      Object.keys(PLANT_REGISTRY[p].models).forEach(m => models.add(m));
+      Object.keys(PLANT_REGISTRY[p].models).forEach(m => {
+        const up = m.toUpperCase();
+        if (['CHILLER_NH', 'CHILLER_CH', 'CHILLER_ADANI', 'CHILLER'].includes(up)) models.add('CHILLER');
+        else models.add(m);
+      });
     }
     
     const list = Array.from(models).sort((a, b) => {
@@ -197,7 +217,7 @@ const Dashboard: React.FC<DashboardProps> = ({ entries, plant, userRole }) => {
 
   const pipelineActivities = useMemo(() => {
     const m = selectedModelFilter.toUpperCase();
-    if (m === 'ALL') return ACTIVITIES_LIST;
+    if (m === 'ALL' || m === 'CHILLER') return ACTIVITIES_LIST;
 
     // Search for model in PLANT_REGISTRY
     const plants = Object.keys(PLANT_REGISTRY);
@@ -211,7 +231,7 @@ const Dashboard: React.FC<DashboardProps> = ({ entries, plant, userRole }) => {
       }
     }
 
-    // For general/mixed pipeline, use the Chakan NH baseline
+    // For general/mixed pipeline, use the Chakan baseline
     return ACTIVITIES_LIST;
   }, [selectedModelFilter]);
 
@@ -347,7 +367,13 @@ const Dashboard: React.FC<DashboardProps> = ({ entries, plant, userRole }) => {
     if (modelToUse === '2X') return PLANT_REGISTRY.AMBERNATH.models["2X"].standards;
     if (modelToUse === '3X') return PLANT_REGISTRY.AMBERNATH.models["3X"].standards;
     if (modelToUse === 'STS') return PLANT_REGISTRY.AMBERNATH.models["STS"].standards;
-    if (modelToUse === 'CHILLER') return PLANT_REGISTRY.CHAKAN.models.CHILLER.standards;
+    if (['CHILLER', 'CHILLER_NH', 'CHILLER_CH', 'CHILLER_ADANI'].includes(modelToUse)) {
+      // For standards, we need to know the specific type if possible, 
+      // but if we only have "CHILLER", we default to NH
+      if (modelToUse === 'CHILLER_CH') return PLANT_REGISTRY.CHAKAN.models.CHILLER_CH.standards;
+      if (modelToUse === 'CHILLER_ADANI') return PLANT_REGISTRY.CHAKAN.models.CHILLER_ADANI.standards;
+      return PLANT_REGISTRY.CHAKAN.models.CHILLER_NH.standards;
+    }
     if (modelToUse === 'PDX') return PLANT_REGISTRY.CHAKAN.models.PDX.standards;
     
     return ACTIVITY_STANDARDS;
@@ -400,7 +426,7 @@ const Dashboard: React.FC<DashboardProps> = ({ entries, plant, userRole }) => {
       losses[e.activity] = (losses[e.activity] || 0) + e.lossHours;
     });
     return Object.entries(losses)
-      .map(([name, hours]) => ({ name, hours }))
+      .map(([name, hours]) => ({ name, hours: Number(hours.toFixed(2)) }))
       .filter(item => item.hours > 0)
       .sort((a, b) => b.hours - a.hours);
   }, [filteredEntries]);
@@ -534,7 +560,11 @@ const Dashboard: React.FC<DashboardProps> = ({ entries, plant, userRole }) => {
                 const activeUnits = Object.entries(activePipelines)
                   .filter(([_, data]: [string, any]) => {
                     const plantMatch = selectedPlantFilter === 'All' || data.plant === selectedPlantFilter;
-                    const modelMatch = selectedModelFilter === 'All' || data.model.toUpperCase() === selectedModelFilter.toUpperCase();
+                    const modelMatch = selectedModelFilter === 'All' 
+                      ? true 
+                      : selectedModelFilter === 'CHILLER'
+                        ? ['CHILLER_NH', 'CHILLER_CH', 'CHILLER_ADANI', 'CHILLER'].includes(data.model.toUpperCase())
+                        : data.model.toUpperCase() === selectedModelFilter.toUpperCase();
                     const activityMatch = data.activity.trim().toUpperCase() === act.trim().toUpperCase();
                     return plantMatch && modelMatch && activityMatch;
                   })
