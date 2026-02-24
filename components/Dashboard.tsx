@@ -236,24 +236,28 @@ const Dashboard: React.FC<DashboardProps> = ({ entries, plant, userRole }) => {
         return timeA - timeB;
       });
 
-    // Group consecutive entries of the same activity into "sessions"
-    const consolidated: any[] = [];
+    // Group all entries of the same activity into "sessions" (clubbing shifts)
+    const consolidatedMap: Record<string, any> = {};
     prodEntries.forEach(e => {
       const startMs = new Date(`${e.productionDate}T${e.startTime}`).getTime();
       const endMs = e.status === 'Completed' 
         ? new Date(`${e.endDate || e.productionDate}T${e.endTime}`).getTime()
         : Date.now();
 
-      const lastGroup = consolidated[consolidated.length - 1];
-      if (lastGroup && lastGroup.activityName === e.activity) {
-        lastGroup.shifts.push(e);
-        lastGroup.startMs = Math.min(lastGroup.startMs, startMs);
-        lastGroup.endMs = Math.max(lastGroup.endMs, endMs);
-        if (endMs >= lastGroup.endMs) {
-          lastGroup.endTime = e.status === 'Completed' ? e.endTime : '-';
+      if (consolidatedMap[e.activity]) {
+        const group = consolidatedMap[e.activity];
+        group.shifts.push(e);
+        if (startMs < group.startMs) {
+          group.startMs = startMs;
+          group.startTime = e.startTime;
+          group.date = e.productionDate;
+        }
+        if (endMs > group.endMs) {
+          group.endMs = endMs;
+          group.endTime = e.status === 'Completed' ? e.endTime : '-';
         }
       } else {
-        consolidated.push({
+        consolidatedMap[e.activity] = {
           activityName: e.activity,
           shifts: [e],
           startMs,
@@ -262,9 +266,10 @@ const Dashboard: React.FC<DashboardProps> = ({ entries, plant, userRole }) => {
           endTime: e.status === 'Completed' ? e.endTime : '-',
           date: e.productionDate,
           isParallel: false
-        });
+        };
       }
     });
+    const consolidated = Object.values(consolidatedMap).sort((a, b) => a.startMs - b.startMs);
 
     const nodes: any[] = [];
     let absoluteLatestEndMs = -Infinity;
@@ -342,9 +347,8 @@ const Dashboard: React.FC<DashboardProps> = ({ entries, plant, userRole }) => {
     if (modelToUse === '2X') return PLANT_REGISTRY.AMBERNATH.models["2X"].standards;
     if (modelToUse === '3X') return PLANT_REGISTRY.AMBERNATH.models["3X"].standards;
     if (modelToUse === 'STS') return PLANT_REGISTRY.AMBERNATH.models["STS"].standards;
-    if (modelToUse === 'NH') return PLANT_REGISTRY.CHAKAN.models.NH.standards;
-    if (modelToUse === 'CH') return PLANT_REGISTRY.CHAKAN.models.CH.standards;
-    if (modelToUse === 'DSE') return PLANT_REGISTRY.CHAKAN.models.DSE.standards;
+    if (modelToUse === 'CHILLER') return PLANT_REGISTRY.CHAKAN.models.CHILLER.standards;
+    if (modelToUse === 'PDX') return PLANT_REGISTRY.CHAKAN.models.PDX.standards;
     
     return ACTIVITY_STANDARDS;
   }, [selectedModelFilter, selectedUnitDetail]);
@@ -657,7 +661,7 @@ const Dashboard: React.FC<DashboardProps> = ({ entries, plant, userRole }) => {
             const totalActualForGroup = group.shifts.reduce((sum: number, s: ProductionEntry) => sum + (s.actualCycleTime || 0), 0) || 1;
 
             return (
-              <div key={group.activityName} className="relative z-10 flex gap-6 group">
+              <div key={`${group.activityName}-${idx}`} className="relative z-10 flex gap-6 group">
                 <div className="mt-1 flex-shrink-0">
                   <div className={`w-5 h-5 rounded-full border-4 transition-all duration-300 ${
                     isCompleted ? 'bg-green-500 border-green-100' : 'bg-blue-600 border-blue-100 scale-125'
