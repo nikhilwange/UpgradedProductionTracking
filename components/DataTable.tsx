@@ -25,9 +25,10 @@ interface SortConfig {
 
 const DataTable: React.FC<DataTableProps> = ({ entries, onDelete, isAdmin }) => {
   const today = new Date().toISOString().split('T')[0];
+  const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
   const [viewMode, setViewMode] = useState<'records' | 'manpower'>('records');
   const [searchQuery, setSearchQuery] = useState('');
-  const [startDate, setStartDate] = useState(today);
+  const [startDate, setStartDate] = useState(sevenDaysAgo);
   const [endDate, setEndDate] = useState(today);
   const [sortConfig, setSortConfig] = useState<SortConfig | null>(null);
   
@@ -84,9 +85,16 @@ const DataTable: React.FC<DataTableProps> = ({ entries, onDelete, isAdmin }) => 
       const isGap = entry.activity === 'Inter-Activity Idle Time' || entry.isGap;
       const assignments = entry.assignments || [];
       
+      // Normalize model name for display
+      const m = (entry.model || '').toUpperCase();
+      let normalizedModel = entry.model;
+      if (['CHILLER_NH', 'CHILLER_CH', 'CHILLER_ADANI', 'ADANI', 'NH'].includes(m)) normalizedModel = 'CHILLER';
+      else if (m === 'CH' || m === 'DSE') normalizedModel = 'PDX';
+
       if (assignments.length <= 1) {
         rows.push({
           ...entry,
+          model: normalizedModel,
           rowId: `${entry.id}-single`,
           displayDate: entry.productionDate,
           displayShift: entry.shift,
@@ -105,6 +113,7 @@ const DataTable: React.FC<DataTableProps> = ({ entries, onDelete, isAdmin }) => 
         assignments.forEach((assign, idx) => {
           rows.push({
             ...entry,
+            model: normalizedModel,
             rowId: `${entry.id}-${idx}`,
             displayDate: assign.date,
             displayShift: assign.shift,

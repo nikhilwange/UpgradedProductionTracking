@@ -4,7 +4,7 @@ import {
 } from 'recharts';
 import { TrendingUp, Clock, AlertTriangle, Package, ChevronDown, Activity as ActivityIcon, FileText, Timer, Filter, Globe, Loader2 } from 'lucide-react';
 import { ProductionEntry } from '../types';
-import { ACTIVITIES_LIST, ACTIVITY_STANDARDS, PLANT_REGISTRY, calculateAvailableMinutes, AMBERNATH_BREAK_TIMES, MODELS_LIST } from '../constants';
+import { ACTIVITIES_LIST, ACTIVITY_STANDARDS, PLANT_REGISTRY, calculateAvailableMinutes, AMBERNATH_BREAK_TIMES, MODELS_LIST, getModelContext } from '../constants';
 
 interface DashboardProps {
   entries: ProductionEntry[];
@@ -23,7 +23,7 @@ const Dashboard: React.FC<DashboardProps> = ({ entries, plant, userRole }) => {
   const normalizedEntries = useMemo(() => {
     return entries.map(e => {
       const m = e.model.toUpperCase();
-      if (m === 'NH') return { ...e, model: 'CHILLER' };
+      if (['CHILLER_NH', 'CHILLER_CH', 'CHILLER_ADANI', 'ADANI', 'NH'].includes(m)) return { ...e, model: 'CHILLER' };
       if (m === 'CH' || m === 'DSE') return { ...e, model: 'PDX' };
       return e;
     });
@@ -59,7 +59,7 @@ const Dashboard: React.FC<DashboardProps> = ({ entries, plant, userRole }) => {
         modelMatch = true;
       } else if (selectedModelFilter === 'CHILLER') {
         // Group NH, CH, and ADANI under the "CHILLER" filter
-        modelMatch = ['CHILLER_NH', 'CHILLER_CH', 'CHILLER_ADANI', 'CHILLER'].includes(e.model.toUpperCase());
+        modelMatch = ['CHILLER_NH', 'CHILLER_CH', 'CHILLER_ADANI', 'CHILLER', 'ADANI'].includes(e.model.toUpperCase());
       } else {
         modelMatch = e.model.toUpperCase() === selectedModelFilter.toUpperCase();
       }
@@ -107,6 +107,7 @@ const Dashboard: React.FC<DashboardProps> = ({ entries, plant, userRole }) => {
     }> = {};
 
     normalizedEntries.forEach(e => {
+      const isIdle = e.activity === "Inter-Activity Idle Time" || e.isGap;
       if (!units[e.serialNo]) {
         units[e.serialNo] = { 
           serialNo: e.serialNo, 
@@ -117,7 +118,7 @@ const Dashboard: React.FC<DashboardProps> = ({ entries, plant, userRole }) => {
           allEntries: [] 
         };
       }
-      if (e.status === 'Completed' && !e.isGap) units[e.serialNo].completedActivities += 1;
+      if (e.status === 'Completed' && !isIdle) units[e.serialNo].completedActivities += 1;
       units[e.serialNo].allEntries.push(e);
       if (new Date(e.createdAt).getTime() > new Date(units[e.serialNo].lastEntry.createdAt).getTime()) {
         units[e.serialNo].lastEntry = e;
@@ -136,7 +137,16 @@ const Dashboard: React.FC<DashboardProps> = ({ entries, plant, userRole }) => {
   const filteredUnitsList = useMemo(() => {
     return unitsList.filter(u => {
       const plantMatch = selectedPlantFilter === 'All' || u.plant === selectedPlantFilter;
-      const modelMatch = selectedModelFilter === 'All' || u.model === selectedModelFilter;
+      
+      let modelMatch = false;
+      if (selectedModelFilter === 'All') {
+        modelMatch = true;
+      } else if (selectedModelFilter === 'CHILLER') {
+        modelMatch = ['CHILLER_NH', 'CHILLER_CH', 'CHILLER_ADANI', 'CHILLER', 'ADANI'].includes(u.model.toUpperCase());
+      } else {
+        modelMatch = u.model.toUpperCase() === selectedModelFilter.toUpperCase();
+      }
+      
       return plantMatch && modelMatch;
     });
   }, [unitsList, selectedPlantFilter, selectedModelFilter]);
@@ -160,7 +170,7 @@ const Dashboard: React.FC<DashboardProps> = ({ entries, plant, userRole }) => {
       else if (m === '2X') models.add('2X');
       else if (m === '3X') models.add('3X');
       else if (m === 'STS') models.add('STS');
-      else if (['CHILLER_NH', 'CHILLER_CH', 'CHILLER_ADANI', 'CHILLER'].includes(m)) models.add('CHILLER');
+      else if (['CHILLER_NH', 'CHILLER_CH', 'CHILLER_ADANI', 'CHILLER', 'ADANI'].includes(m)) models.add('CHILLER');
       else models.add(e.model);
     });
 
@@ -169,7 +179,7 @@ const Dashboard: React.FC<DashboardProps> = ({ entries, plant, userRole }) => {
     if (p !== 'ALL' && PLANT_REGISTRY[p]) {
       Object.keys(PLANT_REGISTRY[p].models).forEach(m => {
         const up = m.toUpperCase();
-        if (['CHILLER_NH', 'CHILLER_CH', 'CHILLER_ADANI', 'CHILLER'].includes(up)) models.add('CHILLER');
+        if (['CHILLER_NH', 'CHILLER_CH', 'CHILLER_ADANI', 'CHILLER', 'ADANI'].includes(up)) models.add('CHILLER');
         else models.add(m);
       });
     }
@@ -193,15 +203,6 @@ const Dashboard: React.FC<DashboardProps> = ({ entries, plant, userRole }) => {
       setSelectedModelFilter('All');
     }
   }, [selectedPlantFilter, availableModels, selectedModelFilter]);
-
-  // Auto-select first model besides 'All' on initial data load
-  useEffect(() => {
-    if (!hasSetDefaultModel.current && availableModels.length > 1) {
-      // Skip index 0 ('All') and select the first actual model
-      setSelectedModelFilter(availableModels[1]);
-      hasSetDefaultModel.current = true;
-    }
-  }, [availableModels]);
 
   // Reset filters if context changes
   useEffect(() => {
@@ -244,134 +245,117 @@ const Dashboard: React.FC<DashboardProps> = ({ entries, plant, userRole }) => {
     if (!selectedUnitDetail) return [];
 
     const prodEntries = [...selectedUnitDetail.allEntries]
-      .filter(e => {
-        const isIdle = e.activity === "Inter-Activity Idle Time";
-        // Show all activity entries, including 'In Progress' placeholders to see them in timeline
-        return !isIdle;
-      })
-      .sort((a, b) => {
-        // Use production date and start time for robust chronological sorting
-        const timeA = new Date(`${a.productionDate}T${a.startTime}`).getTime();
-        const timeB = new Date(`${b.productionDate}T${b.startTime}`).getTime();
-        return timeA - timeB;
-      });
+      .sort((a, b) => new Date(`${a.productionDate}T${a.startTime}`).getTime() - new Date(`${b.productionDate}T${b.startTime}`).getTime());
 
-    // Group all entries of the same activity into "sessions" (clubbing shifts)
-    const consolidatedMap: Record<string, any> = {};
+    // Stage 1: Consolidate activity shifts and identify logged gaps
+    const consolidatedActivities: any[] = [];
+    const loggedGaps: any[] = [];
+
     prodEntries.forEach(e => {
       const startMs = new Date(`${e.productionDate}T${e.startTime}`).getTime();
-      const endMs = e.status === 'Completed' 
-        ? new Date(`${e.endDate || e.productionDate}T${e.endTime}`).getTime()
-        : Date.now();
+      const endMs = e.status === 'Completed' ? new Date(`${e.endDate || e.productionDate}T${e.endTime}`).getTime() : Date.now();
 
-      if (consolidatedMap[e.activity]) {
-        const group = consolidatedMap[e.activity];
-        group.shifts.push(e);
-        if (startMs < group.startMs) {
-          group.startMs = startMs;
-          group.startTime = e.startTime;
-          group.date = e.productionDate;
-        }
-        if (endMs > group.endMs) {
-          group.endMs = endMs;
-          group.endTime = e.status === 'Completed' ? e.endTime : '-';
-        }
+      if (e.activity === "Inter-Activity Idle Time" || e.isGap) {
+        loggedGaps.push({ 
+          type: 'gap', 
+          startMs, 
+          endMs, 
+          idleStart: e.startTime,
+          idleEnd: e.endTime,
+          lossHours: (e.actualCycleTime / 60).toFixed(2),
+          date: e.productionDate, 
+          isLogged: true, 
+          shifts: [e] 
+        });
+        return;
+      }
+
+      const existing = consolidatedActivities.find(a => a.activityName === e.activity);
+      if (existing) {
+        existing.shifts.push(e);
+        existing.startMs = Math.min(existing.startMs, startMs);
+        existing.endMs = Math.max(existing.endMs, endMs);
       } else {
-        consolidatedMap[e.activity] = {
-          activityName: e.activity,
-          shifts: [e],
-          startMs,
-          endMs,
-          startTime: e.startTime,
-          endTime: e.status === 'Completed' ? e.endTime : '-',
-          date: e.productionDate,
-          isParallel: false
-        };
+        consolidatedActivities.push({ type: 'activity', activityName: e.activity, shifts: [e], startMs, endMs });
       }
     });
-    const consolidated = Object.values(consolidatedMap).sort((a, b) => a.startMs - b.startMs);
 
-    const nodes: any[] = [];
-    let absoluteLatestEndMs = -Infinity;
-    let lastTimeStr = '';
+    // Recalculate true start/end times for consolidated activities
+    consolidatedActivities.forEach(a => {
+      const firstShift = a.shifts.sort((s1: any, s2: any) => new Date(`${s1.productionDate}T${s1.startTime}`).getTime() - new Date(`${s2.productionDate}T${s2.startTime}`).getTime())[0];
+      const lastShift = a.shifts.find((s: any) => s.status === 'Completed') || a.shifts[a.shifts.length - 1];
+      
+      a.startTime = firstShift.startTime;
+      a.date = firstShift.productionDate;
+      a.endTime = lastShift.status === 'Completed' ? lastShift.endTime : '-';
+      a.startMs = new Date(`${a.date}T${a.startTime}`).getTime();
+      a.endMs = lastShift.status === 'Completed' ? new Date(`${lastShift.endDate || lastShift.productionDate}T${lastShift.endTime}`).getTime() : Date.now();
+    });
 
-    consolidated.forEach((group, idx) => {
-      // Check for gaps (Inter-Activity Idle Time)
-      if (idx > 0 && group.startMs > absoluteLatestEndMs && absoluteLatestEndMs !== -Infinity) {
-        // EXCLUSION LOGIC: Use the shared helper to calculate available working minutes only
+    // Stage 2: Identify implicit gaps
+    const implicitGaps: any[] = [];
+    const allNodes = [...consolidatedActivities, ...loggedGaps].sort((a, b) => a.startMs - b.startMs);
+    const inProgressActivity = consolidatedActivities.find(a => a.shifts.some((s: any) => s.status === 'In Progress'));
+
+    for (let i = 0; i < allNodes.length - 1; i++) {
+      const currentNode = allNodes[i];
+      const nextNode = allNodes[i + 1];
+      const gapStartMs = currentNode.endMs;
+      const gapEndMs = nextNode.startMs;
+
+      if (gapEndMs > gapStartMs + 60000) { // More than 1 min gap
+        // If an activity is in progress, do not create new implicit gaps after it has started
+        if (inProgressActivity && gapStartMs >= inProgressActivity.startMs) continue;
+
         const m = selectedModelFilter.toUpperCase();
-        const customBreaks = (m === 'LI7' || m === 'LI7 PCA' || m === '2X' || m === '3X' || m === 'STS') ? AMBERNATH_BREAK_TIMES : undefined;
-        const workingGapMins = calculateAvailableMinutes(absoluteLatestEndMs, group.startMs, customBreaks);
-        
-        if (workingGapMins >= 1) {
-          nodes.push({
+        const customBreaks = (['LI7', 'LI7 PCA', '2X', '3X', 'STS'].includes(m)) ? AMBERNATH_BREAK_TIMES : undefined;
+        const workingGapMins = calculateAvailableMinutes(gapStartMs, gapEndMs, customBreaks);
+        const wallClockMins = (gapEndMs - gapStartMs) / 60000;
+
+        if (workingGapMins >= 15 || wallClockMins >= 60) {
+          implicitGaps.push({
             type: 'gap',
-            idleStart: lastTimeStr,
-            idleEnd: group.startTime,
-            lossHours: (workingGapMins / 60).toFixed(2),
-            date: group.date
+            startMs: gapStartMs,
+            endMs: gapEndMs,
+            idleStart: currentNode.type === 'gap' ? currentNode.shifts[0].endTime : currentNode.endTime,
+            idleEnd: nextNode.type === 'gap' ? nextNode.shifts[0].startTime : nextNode.startTime,
+            lossHours: ((workingGapMins || wallClockMins) / 60).toFixed(2),
+            date: new Date(gapStartMs).toISOString().split('T')[0],
+            isLogged: false,
           });
         }
       }
+    }
 
-      for (let j = 0; j < idx; j++) {
-        const prev = consolidated[j];
-        // Parallel logic: Overlap in time + different activity names
-        if (group.startMs < prev.endMs && group.activityName !== prev.activityName) {
-          // STALE IN-PROGRESS CHECK:
-          // If the previous activity is stuck 'In Progress' (endMs is 'Now'), 
-          // but the current activity has already started much later (e.g., different day),
-          // we should not mark it as parallel unless they truly overlap.
-          const prevIsInProgress = prev.shifts.some((s: any) => s.status === 'In Progress');
-          const groupIsNewer = group.startMs > prev.startMs;
-          
-          if (prevIsInProgress && groupIsNewer) {
-            // If group started on a different day than prev started, and prev is still In Progress,
-            // we assume it's a stale entry and not a parallel activity.
-            if (group.date !== prev.date) continue;
-          }
-
-          group.isParallel = true;
-          break;
-        }
-      }
-
-      nodes.push({
-        type: 'activity',
-        ...group
-      });
-
-      if (group.endMs > absoluteLatestEndMs) {
-        absoluteLatestEndMs = group.endMs;
-        lastTimeStr = group.endTime;
-      }
+    // Stage 3: Final combination and sort
+    return [...allNodes, ...implicitGaps].sort((a, b) => {
+      if (a.startMs !== b.startMs) return a.startMs - b.startMs;
+      if (a.type === 'activity' && b.type === 'gap') return -1; // activity first
+      if (a.type === 'gap' && b.type === 'activity') return 1; // gap second
+      return a.endMs - b.endMs;
     });
 
-    return nodes.filter(node => {
-      if (node.type === 'gap') return Number(node.lossHours) > 0;
-      if (node.type === 'activity') {
-        const hasLoss = node.shifts.some((s: ProductionEntry) => (s.lossHours || 0) > 0);
-        const isInProgress = node.shifts.some((s: ProductionEntry) => s.status === 'In Progress');
-        return hasLoss || isInProgress;
-      }
-      return true;
-    });
-  }, [selectedUnitDetail]);
+  }, [selectedUnitDetail, selectedModelFilter]);
 
   const currentStandards = useMemo(() => {
     // Priority: Selected Unit's Model > Selected Model Filter > Default (NH)
-    const modelToUse = (selectedUnitDetail?.model || selectedModelFilter).toUpperCase();
+    if (selectedUnitDetail) {
+      const context = getModelContext(selectedUnitDetail.serialNo, selectedUnitDetail.model, selectedUnitDetail.plant);
+      return context.standards;
+    }
+
+    const modelToUse = selectedModelFilter.toUpperCase();
     
     if (modelToUse === 'LI7') return PLANT_REGISTRY.AMBERNATH.models.Li7.standards;
     if (modelToUse === 'LI7 PCA') return PLANT_REGISTRY.AMBERNATH.models["Li7 PCA"].standards;
     if (modelToUse === '2X') return PLANT_REGISTRY.AMBERNATH.models["2X"].standards;
     if (modelToUse === '3X') return PLANT_REGISTRY.AMBERNATH.models["3X"].standards;
     if (modelToUse === 'STS') return PLANT_REGISTRY.AMBERNATH.models["STS"].standards;
-    if (['CHILLER', 'CHILLER_NH', 'CHILLER_CH', 'CHILLER_ADANI'].includes(modelToUse)) {
+    if (['CHILLER', 'CHILLER_NH', 'CHILLER_CH', 'CHILLER_ADANI', 'ADANI'].includes(modelToUse)) {
       // For standards, we need to know the specific type if possible, 
       // but if we only have "CHILLER", we default to NH
       if (modelToUse === 'CHILLER_CH') return PLANT_REGISTRY.CHAKAN.models.CHILLER_CH.standards;
-      if (modelToUse === 'CHILLER_ADANI') return PLANT_REGISTRY.CHAKAN.models.CHILLER_ADANI.standards;
+      if (modelToUse === 'CHILLER_ADANI' || modelToUse === 'ADANI') return PLANT_REGISTRY.CHAKAN.models.CHILLER_ADANI.standards;
       return PLANT_REGISTRY.CHAKAN.models.CHILLER_NH.standards;
     }
     if (modelToUse === 'PDX') return PLANT_REGISTRY.CHAKAN.models.PDX.standards;
@@ -482,7 +466,7 @@ const Dashboard: React.FC<DashboardProps> = ({ entries, plant, userRole }) => {
 
   return (
     <div className="space-y-8 pb-12">
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8">
         <KPICard icon={<Package className="text-blue-500" />} label="Active Serial Units" value={stats?.uniqueUnits.toString() || '0'} subtext="Unique Serial numbers tracked" />
         <KPICard icon={<Clock className="text-amber-500" />} label="Engaged Manhours" value={stats?.totalManhours.toFixed(1) || '0'} unit="Hrs" subtext="Total labor input" />
         <KPICard icon={<TrendingUp className={stats?.avgVariance && stats.avgVariance > 0 ? 'text-red-500' : 'text-green-500'} />} label="Avg Time Variance" value={stats?.avgVariance.toFixed(1) || '0'} unit="Min" subtext="Per activity deviation" />
@@ -563,7 +547,7 @@ const Dashboard: React.FC<DashboardProps> = ({ entries, plant, userRole }) => {
                     const modelMatch = selectedModelFilter === 'All' 
                       ? true 
                       : selectedModelFilter === 'CHILLER'
-                        ? ['CHILLER_NH', 'CHILLER_CH', 'CHILLER_ADANI', 'CHILLER'].includes(data.model.toUpperCase())
+                        ? ['CHILLER_NH', 'CHILLER_CH', 'CHILLER_ADANI', 'CHILLER', 'ADANI'].includes(data.model.toUpperCase())
                         : data.model.toUpperCase() === selectedModelFilter.toUpperCase();
                     const activityMatch = data.activity.trim().toUpperCase() === act.trim().toUpperCase();
                     return plantMatch && modelMatch && activityMatch;
@@ -653,29 +637,62 @@ const Dashboard: React.FC<DashboardProps> = ({ entries, plant, userRole }) => {
           {timelineNodes.map((node, idx) => {
             if (node.type === 'gap') {
               return (
-                <div key={`gap-${idx}`} className="relative z-10 flex gap-6 group">
+                <div key={`gap-${node.startMs}-${idx}`} className="relative z-10 flex gap-6 group">
                   <div className="mt-1 flex-shrink-0">
                     <div className="w-5 h-5 rounded-full border-4 bg-indigo-600 border-indigo-100" />
                   </div>
-                  <div className="flex-1 bg-indigo-50/20 border border-indigo-200 rounded-[2rem] p-6 hover:border-indigo-300 transition-all relative overflow-hidden">
-                    <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
+                  <div className="flex-1 bg-white border border-blue-100 rounded-[2rem] p-6 shadow-sm hover:shadow-md transition-all relative overflow-hidden">
+                    <div className="flex flex-col lg:flex-row justify-between gap-6">
                       <div className="flex-1 space-y-4">
                         <div className="space-y-1">
                           <span className="text-[10px] font-black text-blue-400 uppercase tracking-widest block ml-1">DATE: {formatDate(node.date)}</span>
-                          <div className="flex flex-wrap items-baseline gap-4">
-                            <h4 className="text-xl font-black text-indigo-900 tracking-tight leading-none">Inter-Activity Idle Time</h4>
-                            <div className="flex items-center gap-1.5 px-3 py-1 bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-full text-[10px] font-black uppercase leading-none">
-                              IDLE PHASE
+                          <div className="flex flex-wrap items-center gap-4">
+                            <h4 className="text-xl font-black text-indigo-900 tracking-tight leading-none">Inter-activity Idle Time</h4>
+                            <div className="flex items-center gap-1.5 px-3 py-1 bg-blue-50 text-blue-600 border border-blue-100 rounded-full text-[10px] font-black uppercase leading-none">
+                              {node.isLogged ? 'LOGGED LOSS' : 'IDLE PHASE'}
                             </div>
-                            <div className="flex items-center gap-1.5 px-3 py-1 bg-[#4F46E5] text-white rounded-full text-[10px] font-black uppercase leading-none">
-                              TOTAL LOSS: {node.lossHours} hrs
+                            <div className="flex items-center gap-1.5 px-4 py-1.5 bg-indigo-600 text-white rounded-full text-[10px] font-black uppercase leading-none shadow-sm">
+                              TOTAL LOSS: {node.lossHours} HRS
                             </div>
                           </div>
+
+                          {node.isLogged && (
+                            <div className="p-4 bg-white/50 rounded-2xl border border-indigo-100 space-y-2 mt-2">
+                              <div className="flex items-center gap-2">
+                                <AlertTriangle size={14} className="text-amber-500" />
+                                <span className="text-[10px] font-black text-slate-500 uppercase tracking-wider">Attribution: {node.shifts[0].lossReason}</span>
+                              </div>
+                              <p className="text-xs font-bold text-slate-600 italic">"{node.shifts[0].issueDescription || node.shifts[0].notes}"</p>
+                            </div>
+                          )}
                         </div>
 
-                        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                          <MetricBox label="Idle Start" value={formatTimeDisplay(node.idleStart)} theme="indigo" />
-                          <MetricBox label="Idle End" value={formatTimeDisplay(node.idleEnd)} theme="indigo" />
+                        <div className="flex flex-wrap gap-4">
+                          <div className="bg-blue-50/50 p-6 rounded-3xl border border-blue-100 flex flex-col items-center justify-center text-center min-w-[140px]">
+                            <span className="text-[10px] font-black text-blue-400 mb-2 uppercase tracking-widest">IDLE START</span>
+                            <span className="text-xl font-black text-blue-900">{formatTimeDisplay(node.idleStart)}</span>
+                          </div>
+                          <div className="bg-blue-50/50 p-6 rounded-3xl border border-blue-100 flex flex-col items-center justify-center text-center min-w-[140px]">
+                            <span className="text-[10px] font-black text-blue-400 mb-2 uppercase tracking-widest">IDLE END</span>
+                            <span className="text-xl font-black text-blue-900">{formatTimeDisplay(node.idleEnd)}</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="lg:pl-8 lg:border-l border-slate-100 flex flex-col justify-center lg:w-64">
+                        <div className="flex items-center gap-2 mb-4">
+                          <Clock size={16} className="text-blue-400" />
+                          <span className="text-[10px] font-black text-blue-400 uppercase tracking-widest">TIMELINE OVERVIEW</span>
+                        </div>
+                        <div className="space-y-3">
+                          <div className="flex items-center justify-between gap-4">
+                            <span className="text-xs font-bold text-blue-600">Idle Start</span>
+                            <span className="bg-blue-50 px-3 py-1 rounded-lg text-xs font-black text-blue-900">{formatTimeDisplay(node.idleStart)}</span>
+                          </div>
+                          <div className="flex items-center justify-between gap-4">
+                            <span className="text-xs font-bold text-blue-600">Idle End</span>
+                            <span className="bg-blue-50 px-3 py-1 rounded-lg text-xs font-black text-blue-900">{formatTimeDisplay(node.idleEnd)}</span>
+                          </div>
                         </div>
                       </div>
                     </div>
@@ -691,7 +708,7 @@ const Dashboard: React.FC<DashboardProps> = ({ entries, plant, userRole }) => {
             const totalActualForGroup = group.shifts.reduce((sum: number, s: ProductionEntry) => sum + (s.actualCycleTime || 0), 0) || 1;
 
             return (
-              <div key={`${group.activityName}-${idx}`} className="relative z-10 flex gap-6 group">
+              <div key={`node-${group.activityName}-${group.startMs}-${idx}`} className="relative z-10 flex gap-6 group">
                 <div className="mt-1 flex-shrink-0">
                   <div className={`w-5 h-5 rounded-full border-4 transition-all duration-300 ${
                     isCompleted ? 'bg-green-500 border-green-100' : 'bg-blue-600 border-blue-100 scale-125'
@@ -702,12 +719,6 @@ const Dashboard: React.FC<DashboardProps> = ({ entries, plant, userRole }) => {
                   isCompleted ? 'border-slate-100 shadow-sm opacity-90' : 'border-blue-200 shadow-lg ring-4 ring-blue-50'
                 } hover:border-blue-200 relative overflow-hidden`}>
                   
-                  {group.isParallel && (
-                    <div className="absolute top-0 right-0 bg-blue-600 text-white px-6 py-2 rounded-bl-3xl text-[11px] font-black uppercase tracking-widest shadow-lg z-20">
-                      PARALLEL ACTIVITY
-                    </div>
-                  )}
-
                   {isInProgressOnly && (
                     <div className="absolute top-0 right-0 p-4">
                        <div className="flex items-center gap-2 bg-amber-100/80 text-amber-700 px-4 py-1.5 rounded-full text-[10px] font-black uppercase animate-pulse shadow-sm border border-amber-200/50 backdrop-blur-[2px]">

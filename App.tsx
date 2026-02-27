@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { LayoutDashboard, ClipboardList, Database, Factory, Sparkles, Users, Maximize, Minimize, LogOut, ShieldCheck, ShieldAlert, Settings, Loader2, LineChart, Briefcase, User, Shield, RefreshCcw, WifiOff } from 'lucide-react';
+import { LayoutGrid, ClipboardList, Database, Factory, Sparkles, Users, Maximize, Minimize, LogOut, ShieldCheck, ShieldAlert, Settings, Loader2, LineChart, Briefcase, User, Shield, RefreshCcw, WifiOff } from 'lucide-react';
 import { ProductionEntry } from './types';
 import OperatorEntry from './components/OperatorEntry';
 import Dashboard from './components/Dashboard';
@@ -126,13 +126,15 @@ const App: React.FC = () => {
         const result: any = await Promise.race([sessionPromise, timeoutPromise]);
         
         if (result.error) {
-          console.error("Session Error detected:", result.error.message);
-          // Catch and handle JWT errors specifically
+          const errorMsg = result.error.message?.toLowerCase() || '';
+          console.error("Session Error detected:", errorMsg);
+          // Catch and handle JWT/Refresh errors specifically
           if (
-            result.error.message.includes('refresh_token') || 
-            result.error.message.includes('not found') || 
-            result.error.message.includes('JWT') ||
-            result.error.message.includes('exp')
+            errorMsg.includes('refresh') || 
+            errorMsg.includes('token') ||
+            errorMsg.includes('not found') || 
+            errorMsg.includes('jwt') ||
+            errorMsg.includes('exp')
           ) {
             clearLocalCaches();
             setSession(null);
@@ -179,7 +181,8 @@ const App: React.FC = () => {
           setHomePlant(plant);
         }
       } catch (e: any) {
-        if (e.message.includes('JWT') || e.message.includes('exp')) {
+        const msg = e.message?.toLowerCase() || '';
+        if (msg.includes('jwt') || msg.includes('exp') || msg.includes('refresh') || msg.includes('token')) {
           clearLocalCaches();
           setSession(null);
           setUserRole(null);
@@ -206,16 +209,22 @@ const App: React.FC = () => {
     }
   };
 
-  const fetchCloudData = async () => {
+  const fetchCloudData = async (retryCount = 0) => {
     if (!session || !userRole) return;
+    
+    // Guard against offline state to prevent "Failed to fetch" noise
+    if (!navigator.onLine) {
+      setIsSyncing(false);
+      return;
+    }
     
     setIsSyncing(true);
     try {
       let query = supabase
         .from('production_entries')
         .select('*')
-        .order('production_date', { ascending: true })
-        .order('start_time', { ascending: true });
+        .order('created_at', { ascending: false })
+        .limit(1000); // Optimized for most recent data visibility and network stability
 
       // DATA ISOLATION LOGIC:
       // Admins AND Management users can see cross-plant data (Global Viewers).
@@ -233,13 +242,13 @@ const App: React.FC = () => {
           stage: item.station || '',     
           productLine: item.product_line || '',
           model: item.model || '',
-          serialNo: item.serial_no || '', // CORRECTED: Changed serial_no to serialNo to match interface
-          unitSrNo: item.unit_sr_no || '',
-          soSqNo: item.so_sq_no || '',
+          serialNo: (item.serial_no || '').trim(),
+          unitSrNo: (item.unit_sr_no || '').trim(),
+          soSqNo: (item.so_sq_no || '').trim(),
           productionDate: item.production_date || '',
           endDate: item.end_date,
           shift: item.shift || 'Shift 1',
-          activity: item.stage || '',    
+          activity: (item.stage || '').trim(),    
           manpower: Number(item.manpower) || 0,
           manpowerNames: Array.isArray(item.manpower_names) ? item.manpower_names : [],
           assignments: Array.isArray(item.shift_assignments) ? item.shift_assignments : [],
@@ -263,7 +272,13 @@ const App: React.FC = () => {
         })));
       }
     } catch (e: any) {
-      console.warn("Sync Issue:", e.message);
+      const isNetworkError = e.message === 'Failed to fetch' || e.name === 'TypeError' || e.message?.includes('NetworkError');
+      if (isNetworkError && retryCount < 3) {
+        console.log(`Retrying sync (${retryCount + 1}/3)...`);
+        setTimeout(() => fetchCloudData(retryCount + 1), 1500 * (retryCount + 1));
+      } else {
+        console.error("Sync Error:", e.message);
+      }
     } finally {
       setIsSyncing(false);
     }
@@ -272,6 +287,14 @@ const App: React.FC = () => {
   useEffect(() => {
     if (session && userRole) {
       fetchCloudData();
+      
+      // Sync when coming back online
+      const handleOnline = () => {
+        console.log("Network restored, re-syncing...");
+        fetchCloudData();
+      };
+      window.addEventListener('online', handleOnline);
+
       const channel = supabase.channel('realtime_production')
         .on('postgres_changes', { 
           event: '*', 
@@ -279,11 +302,14 @@ const App: React.FC = () => {
           table: 'production_entries' 
         }, () => fetchCloudData())
         .subscribe();
-      return () => { supabase.removeChannel(channel); };
+      return () => { 
+        window.removeEventListener('online', handleOnline);
+        supabase.removeChannel(channel); 
+      };
     }
   }, [session, userRole, homePlant]);
 
-  const handleAddEntry = async (entryOrEntries: ProductionEntry | ProductionEntry[]) => {
+  const handleAddEntry = async (entryOrEntries: ProductionEntry | ProductionEntry[], retryCount = 0) => {
     const newEntries = Array.isArray(entryOrEntries) ? entryOrEntries : [entryOrEntries];
     setIsSyncing(true);
     try {
@@ -330,7 +356,13 @@ const App: React.FC = () => {
       if (newEntries.some(e => e.status === 'Completed')) setActiveTab('dashboard');
       fetchCloudData(); 
     } catch (e: any) {
-      alert(`Terminal Sync Failure: ${e.message}`);
+      const isNetworkError = e.message === 'Failed to fetch' || e.name === 'TypeError' || e.message?.includes('NetworkError');
+      if (isNetworkError && retryCount < 3) {
+        console.log(`Retrying submission (${retryCount + 1}/3)...`);
+        setTimeout(() => handleAddEntry(entryOrEntries, retryCount + 1), 1500 * (retryCount + 1));
+      } else {
+        alert(`Terminal Sync Failure: ${e.message}. Please check your network connection.`);
+      }
     } finally {
       setIsSyncing(false);
     }
@@ -441,7 +473,7 @@ const App: React.FC = () => {
           </div>
         </div>
         <div className="mt-4 px-3 space-y-1">
-          <NavItem active={activeTab === 'dashboard'} onClick={() => setActiveTab('dashboard')} icon={<LayoutDashboard size={20} />} label="Dashboard" />
+          <NavItem active={activeTab === 'dashboard'} onClick={() => setActiveTab('dashboard')} icon={<LayoutGrid size={20} />} label="Dashboard" />
           <NavItem active={activeTab === 'entry'} onClick={() => setActiveTab('entry')} icon={<ClipboardList size={20} />} label="Operator Input" />
           <NavItem active={activeTab === 'manpower'} onClick={() => setActiveTab('manpower')} icon={<Users size={20} />} label="Manpower Registry" />
           <NavItem active={activeTab === 'data'} onClick={() => setActiveTab('data')} icon={<Database size={20} />} label="Database View" />
@@ -473,7 +505,7 @@ const App: React.FC = () => {
           <div className="flex items-center gap-4">
             <div className="flex items-center gap-3">
               <div className="p-2.5 bg-slate-50 rounded-2xl text-blue-600 shadow-sm">
-                {activeTab === 'dashboard' && <LayoutDashboard size={22} />}
+                {activeTab === 'dashboard' && <LayoutGrid size={22} />}
                 {activeTab === 'entry' && <ClipboardList size={22} />}
                 {activeTab === 'manpower' && <Users size={22} />}
                 {activeTab === 'data' && <Database size={22} />}

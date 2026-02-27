@@ -27,7 +27,7 @@ const CHAKAN_CH_STAGE_MAPPING: Record<string, string[]> = {
 };
 
 const CHAKAN_ADANI_STAGE_MAPPING: Record<string, string[]> = {
-  "Loading": ["Frame Movement", "Evaporator Installation", "Compressor Installation", "Electrical Adaptor Box Mounting", "Pump Assembly", "Pump VFD Mounting", "Evaporator Inlet Pipe", "Discharge Pipe Installation", "Suction Line Installation", "Compressor Housing Mounting", "V Coil Mounting", "Hydraulic Pipe Line Installation"],
+  "Loading": ["Frame Movement", "Evaporator Installation", "Compressor Installation", "Electrical Adaptor Box Mounting", "Active Harmonic Filter (AHF) Mounting", "Pump Assembly", "Pump VFD Mounting", "Evaporator Inlet Pipe", "Discharge Pipe Installation", "Suction Line Installation", "Compressor Housing Mounting", "V Coil Mounting", "Hydraulic Pipe Line Installation"],
   "Brazing": ["Discharge Line", "Liquid Line", "Fan Assembly", "Fan Wiring"],
   "Wiring": ["Insulation", "Valves Fitting", "Wiring", "Vacuuming", "Refrigerant"],
   "Dry Run Test": ["Dry Run Test"],
@@ -55,7 +55,7 @@ const CHAKAN_CH_ACTIVITY_STANDARDS: Record<string, number> = {
 };
 
 const CHAKAN_ADANI_ACTIVITY_STANDARDS: Record<string, number> = {
-  "Frame Movement": 120, "Evaporator Installation": 66, "Compressor Installation": 144, "Electrical Adaptor Box Mounting": 45, "Pump Assembly": 40, "Pump VFD Mounting": 45, "Evaporator Inlet Pipe": 65, "Discharge Pipe Installation": 36, "Suction Line Installation": 70, "Compressor Housing Mounting": 100, "V Coil Mounting": 220, "Hydraulic Pipe Line Installation": 204, "Discharge Line": 265, "Liquid Line": 248, "Fan Assembly": 320, "Fan Wiring": 240, "Insulation": 540, "Valves Fitting": 253, "Wiring": 518, "Vacuuming": 315, "Refrigerant": 202, "Dry Run Test": 1200, "EOL": 900, "Finishing": 423
+  "Frame Movement": 120, "Evaporator Installation": 66, "Compressor Installation": 144, "Electrical Adaptor Box Mounting": 45, "Active Harmonic Filter (AHF) Mounting": 30, "Pump Assembly": 40, "Pump VFD Mounting": 45, "Evaporator Inlet Pipe": 65, "Discharge Pipe Installation": 36, "Suction Line Installation": 70, "Compressor Housing Mounting": 100, "V Coil Mounting": 220, "Hydraulic Pipe Line Installation": 204, "Discharge Line": 265, "Liquid Line": 248, "Fan Assembly": 320, "Fan Wiring": 240, "Insulation": 540, "Valves Fitting": 253, "Wiring": 518, "Vacuuming": 315, "Refrigerant": 202, "Dry Run Test": 1200, "EOL": 900, "Finishing": 423
 };
 
 const CHAKAN_PDX_ACTIVITY_STANDARDS: Record<string, number> = {
@@ -372,6 +372,7 @@ export const ACTIVITIES_LIST = [
   "Evaporator Installation",
   "Compressor Installation",
   "Electrical Adaptor Box Mounting",
+  "Active Harmonic Filter (AHF) Mounting",
   "Pump Assembly",
   "Pump VFD Mounting",
   "Hydraulic Piping-1",

@@ -119,6 +119,7 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
   const filteredModels = useMemo(() => {
     const p = plant?.toUpperCase();
     if (!p || !PLANT_REGISTRY[p]) return [];
+    if (p === 'CHAKAN') return ['CHILLER', 'PDX'];
     return Object.keys(PLANT_REGISTRY[p].models);
   }, [plant]);
 
@@ -223,6 +224,7 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
   const [isAutoLoss, setIsAutoLoss] = useState(true);
 
   const [lastLog, setLastLog] = useState<{ endTime: string, endDate: string, stageName: string } | null>(null);
+  const [hasOtherInProgress, setHasOtherInProgress] = useState(false);
   const [idleGapMinutes, setIdleGapMinutes] = useState(0);
   const [isFetchingLastLog, setIsFetchingLastLog] = useState(false);
   const [idleAttribution, setIdleAttribution] = useState({ affectedParameter: '', defectCategory: '', issueDescription: '' });
@@ -446,19 +448,30 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
 
         if (data && !error && data.end_time) setLastLog({ endTime: data.end_time, endDate: data.end_date || data.production_date, stageName: data.stage });
         else { setLastLog(null); setIdleGapMinutes(0); }
-      } catch (err) { setLastLog(null); setIdleGapMinutes(0); } finally { setIsFetchingLastLog(false); }
+
+        // Check if there are OTHER activities already in progress for this serial number
+        // This prevents double-counting the idle gap if multiple activities are started for the same unit.
+        const { data: others, error: othersError } = await supabase
+          .from('production_entries')
+          .select('id')
+          .ilike('serial_no', cleanSerial)
+          .eq('status', 'In Progress')
+          .neq('stage', cleanActivity); // 'stage' column in DB stores the activity name
+
+        setHasOtherInProgress(others && others.length > 0 ? true : false);
+      } catch (err) { setLastLog(null); setIdleGapMinutes(0); setHasOtherInProgress(false); } finally { setIsFetchingLastLog(false); }
     };
     checkStatus();
   }, [serialNo, activity, userHasSelectedActivity]);
 
   useEffect(() => {
-    if (lastLog && startTime && productionDate && !activeInProgressEntry && userHasSelectedActivity) {
+    if (lastLog && startTime && productionDate && !activeInProgressEntry && userHasSelectedActivity && !hasOtherInProgress) {
       const prevEndMs = toStandardMs(lastLog.endDate, lastLog.endTime);
       const currStartMs = toStandardMs(productionDate, startTime);
       const available = calculateAvailableGapMins(prevEndMs, currStartMs);
       setIdleGapMinutes(available > 0 ? Math.round(available) : 0);
     } else setIdleGapMinutes(0);
-  }, [lastLog, startTime, productionDate, serialNo, activeInProgressEntry, userHasSelectedActivity]);
+  }, [lastLog, startTime, productionDate, serialNo, activeInProgressEntry, userHasSelectedActivity, hasOtherInProgress]);
 
   useEffect(() => { if (!activeInProgressEntry) setEndDate(productionDate); }, [productionDate, activeInProgressEntry]);
 
