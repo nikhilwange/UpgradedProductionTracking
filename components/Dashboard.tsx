@@ -86,7 +86,7 @@ const Dashboard: React.FC<DashboardProps> = ({ entries, plant, userRole }) => {
   const getActiveActivityName = (unitEntries: ProductionEntry[]) => {
     const activityStatus: Record<string, { hasStart: boolean; hasEnd: boolean }> = {};
     unitEntries.forEach(e => {
-      if (e.isGap || e.activity === "Inter-Activity Idle Time") return;
+      if (e.is_gap || e.activity === "Inter-Activity Idle Time") return;
       if (!activityStatus[e.activity]) activityStatus[e.activity] = { hasStart: false, hasEnd: false };
       if (e.status === 'In Progress') activityStatus[e.activity].hasStart = true;
       if (e.status === 'Completed') activityStatus[e.activity].hasEnd = true;
@@ -107,7 +107,7 @@ const Dashboard: React.FC<DashboardProps> = ({ entries, plant, userRole }) => {
     }> = {};
 
     normalizedEntries.forEach(e => {
-      const isIdle = e.activity === "Inter-Activity Idle Time" || e.isGap;
+      const isIdle = e.activity === "Inter-Activity Idle Time" || e.is_gap;
       if (!units[e.serialNo]) {
         units[e.serialNo] = { 
           serialNo: e.serialNo, 
@@ -131,7 +131,7 @@ const Dashboard: React.FC<DashboardProps> = ({ entries, plant, userRole }) => {
     });
 
     return Object.values(units).sort((a, b) => new Date(b.lastEntry.createdAt).getTime() - new Date(a.lastEntry.createdAt).getTime());
-  }, [entries]);
+  }, [normalizedEntries]);
 
   // Filtered unit dropdown list
   const filteredUnitsList = useMemo(() => {
@@ -262,7 +262,7 @@ const Dashboard: React.FC<DashboardProps> = ({ entries, plant, userRole }) => {
       const startMs = safeParseMs(e.productionDate, e.startTime);
       const endMs = e.status === 'Completed' ? safeParseMs(e.endDate || e.productionDate, e.endTime) : Date.now();
 
-      if (e.activity === "Inter-Activity Idle Time" || e.isGap) {
+      if (e.activity === "Inter-Activity Idle Time" || e.is_gap) {
         loggedGaps.push({ 
           type: 'gap', 
           startMs, 
@@ -316,8 +316,8 @@ const Dashboard: React.FC<DashboardProps> = ({ entries, plant, userRole }) => {
         if (gapEndMs > gapStartMs + 60000) { // More than 1 min gap
           if (inProgressActivity && gapStartMs >= inProgressActivity.startMs) continue;
 
-          const m = selectedModelFilter.toUpperCase();
-          const customBreaks = (['LI7', 'LI7 PCA', '2X', '3X', 'STS'].includes(m)) ? AMBERNATH_BREAK_TIMES : undefined;
+          const unitModel = (selectedUnitDetail?.model || selectedModelFilter).toUpperCase();
+          const customBreaks = (['LI7', 'LI7 PCA', '2X', '3X', 'STS'].includes(unitModel)) ? AMBERNATH_BREAK_TIMES : undefined;
           const workingGapMins = calculateAvailableMinutes(gapStartMs, gapEndMs, customBreaks);
           const wallClockMins = (gapEndMs - gapStartMs) / 60000;
 
@@ -390,7 +390,7 @@ const Dashboard: React.FC<DashboardProps> = ({ entries, plant, userRole }) => {
     
     filteredEntries.forEach(e => {
       // Exclude In Progress entries and Gap/Idle entries from the performance benchmark
-      if (e.status === 'In Progress' || e.isGap || e.activity === "Inter-Activity Idle Time") return;
+      if (e.status === 'In Progress' || e.is_gap || e.activity === "Inter-Activity Idle Time") return;
       
       if (!activityData[e.activity]) {
         const std = getStandardValue(e.activity, e.standardCycleTime || 0);
@@ -421,7 +421,7 @@ const Dashboard: React.FC<DashboardProps> = ({ entries, plant, userRole }) => {
     const losses: Record<string, number> = {};
     filteredEntries.forEach(e => {
       // Exclude Gap/Idle entries from the bottleneck analysis to focus only on production activities
-      if (e.isGap || e.activity === "Inter-Activity Idle Time") return;
+      if (e.is_gap || e.activity === "Inter-Activity Idle Time") return;
       losses[e.activity] = (losses[e.activity] || 0) + e.lossHours;
     });
     return Object.entries(losses)
@@ -436,7 +436,7 @@ const Dashboard: React.FC<DashboardProps> = ({ entries, plant, userRole }) => {
     // Group entries by unit
     const unitEntriesMap: Record<string, ProductionEntry[]> = {};
     (entries || []).forEach(e => {
-      if (e.isGap || e.activity === "Inter-Activity Idle Time") return;
+      if (e.is_gap || e.activity === "Inter-Activity Idle Time") return;
       if (!unitEntriesMap[e.serialNo]) unitEntriesMap[e.serialNo] = [];
       unitEntriesMap[e.serialNo].push(e);
     });

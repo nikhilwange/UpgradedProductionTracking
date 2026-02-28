@@ -82,7 +82,7 @@ const DataTable: React.FC<DataTableProps> = ({ entries, onDelete, isAdmin }) => 
   const flattenedRecords = useMemo(() => {
     const rows: any[] = [];
     (entries || []).forEach(entry => {
-      const isGap = entry.activity === 'Inter-Activity Idle Time' || entry.isGap;
+      const is_gap = entry.activity === 'Inter-Activity Idle Time' || entry.is_gap;
       const assignments = entry.assignments || [];
       
       // Normalize model name for display
@@ -107,7 +107,7 @@ const DataTable: React.FC<DataTableProps> = ({ entries, onDelete, isAdmin }) => 
           rowIssueDescription: entry.issueDescription,
           rowLossHours: entry.lossHours,
           rowStatus: entry.status,
-          isGap
+          is_gap
         });
       } else {
         assignments.forEach((assign, idx) => {
@@ -126,7 +126,7 @@ const DataTable: React.FC<DataTableProps> = ({ entries, onDelete, isAdmin }) => 
             rowIssueDescription: assign.issueDescription,
             rowLossHours: (assign.actualMinutes / (entry.actualCycleTime || 1)) * entry.lossHours,
             rowStatus: entry.status,
-            isGap
+            is_gap
           });
         });
       }
@@ -289,8 +289,8 @@ const DataTable: React.FC<DataTableProps> = ({ entries, onDelete, isAdmin }) => 
         formatTimeDisplay(r.shiftStartTime),
         formatTimeDisplay(r.shiftEndTime),
         r.rowStatus,
-        r.isGap ? r.rowLossHours.toFixed(2) : '0.00',
-        !r.isGap ? r.rowLossHours.toFixed(2) : '0.00',
+        r.is_gap ? r.rowLossHours.toFixed(2) : '0.00',
+        !r.is_gap ? r.rowLossHours.toFixed(2) : '0.00',
         r.displayActual,
         r.rowAffectedParameter || 'N/A',
         r.rowDefectCategory || 'N/A',
@@ -520,7 +520,7 @@ const DataTable: React.FC<DataTableProps> = ({ entries, onDelete, isAdmin }) => 
                         <span className="text-[9px] text-slate-400 font-mono font-bold tracking-tighter">SN: {row.serialNo}</span>
                       </div>
                     </td>
-                    <td className="px-2 py-3 text-center"><p className={`text-[10px] font-bold leading-tight ${row.isGap ? 'text-purple-600' : 'text-slate-600'} truncate`}>{toTitleCase(row.activity)}</p></td>
+                    <td className="px-2 py-3 text-center"><p className={`text-[10px] font-bold leading-tight ${row.is_gap ? 'text-purple-600' : 'text-slate-600'} truncate`}>{toTitleCase(row.activity)}</p></td>
                     <td className="px-2 py-3 text-center font-mono text-[10px] text-slate-900 font-bold">{formatTimeDisplay(row.shiftStartTime)}</td>
                     <td className="px-2 py-3 text-center font-mono text-[10px] text-slate-900 font-bold">{formatTimeDisplay(row.shiftEndTime)}</td>
                     <td className="px-2 py-3 text-center">
@@ -532,8 +532,8 @@ const DataTable: React.FC<DataTableProps> = ({ entries, onDelete, isAdmin }) => 
                         {row.rowStatus || 'Completed'}
                       </span>
                     </td>
-                    <td className="px-2 py-3 text-right font-mono text-[11px] font-black text-purple-600">{row.isGap ? (row.rowLossHours || 0).toFixed(2) : '0.00'}</td>
-                    <td className="px-2 py-3 text-right font-mono text-[11px] font-black text-rose-600">{!row.isGap ? (row.rowLossHours || 0).toFixed(2) : '0.00'}</td>
+                    <td className="px-2 py-3 text-right font-mono text-[11px] font-black text-purple-600">{row.is_gap ? (row.rowLossHours || 0).toFixed(2) : '0.00'}</td>
+                    <td className="px-2 py-3 text-right font-mono text-[11px] font-black text-rose-600">{!row.is_gap ? (row.rowLossHours || 0).toFixed(2) : '0.00'}</td>
                     <td className="px-2 py-3 text-center font-mono text-[10px] font-black text-slate-900">{row.displayActual}m</td>
                     <td className="px-2 py-3 text-center"><span className={`text-[9px] font-black px-1.5 py-0.5 rounded ${row.rowAffectedParameter ? 'bg-slate-100 text-slate-600 border border-slate-200' : 'text-slate-300'}`}>{row.rowAffectedParameter || '—'}</span></td>
                     <td className="px-2 py-3 text-center"><span className={`text-[9px] font-black px-1.5 py-0.5 rounded ${row.rowDefectCategory ? 'bg-slate-100 text-slate-600 border border-slate-200' : 'text-slate-300'}`}>{row.rowDefectCategory || '—'}</span></td>

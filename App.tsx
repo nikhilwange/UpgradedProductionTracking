@@ -348,7 +348,7 @@ const App: React.FC = () => {
           is_gap: newEntry.is_gap || false,
           user_email: session?.user?.email || 'unknown'
         };
-        if (newEntry.id && !isNaN(Number(newEntry.id)) && String(newEntry.id).length < 10) {
+        if (newEntry.id && !isNaN(Number(newEntry.id))) {
           entryData.id = Number(newEntry.id);
         }
         return entryData;

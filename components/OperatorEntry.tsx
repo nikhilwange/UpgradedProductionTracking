@@ -9,6 +9,15 @@ import { ProductionEntry } from '../types';
 import { supabase } from '../supabase';
 import { Html5QrcodeScanner } from 'html5-qrcode';
 
+const useDebounce = (value: string, delay: number) => {
+  const [debouncedValue, setDebouncedValue] = useState(value);
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedValue(value), delay);
+    return () => clearTimeout(timer);
+  }, [value, delay]);
+  return debouncedValue;
+};
+
 // Shift Boundaries
 const S1_START = 420;  // 07:00
 const S1_END = 930;    // 15:30
@@ -119,6 +128,7 @@ const FormDateTimeInput: React.FC<{
 const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plant, userRole }) => {
   const isAdmin = userRole === 'admin';
   const [serialNo, setSerialNo] = useState('');
+  const debouncedSerialNo = useDebounce(serialNo, 600);
   const [unitSrNo, setUnitSrNo] = useState('');
   const [showSuccessOverlay, setShowSuccessOverlay] = useState(false);
   
@@ -215,7 +225,7 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
       existing.serialNo.toLowerCase() === cleanSerial && 
       existing.activity.toLowerCase() === cleanActivity &&
       existing.status === 'Completed' &&
-      !existing.isGap
+      !existing.is_gap
     );
   }, [entries, serialNo, activity]);
 
@@ -239,12 +249,6 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
   const [idleAttribution, setIdleAttribution] = useState({ affectedParameter: '', defectCategory: '', issueDescription: '' });
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [userHasSelectedActivity, setUserHasSelectedActivity] = useState(false);
-
-  const toMins = (time: string) => {
-    if (!time) return 0;
-    const [h, m] = time.split(':').map(Number);
-    return (h || 0) * 60 + (m || 0);
-  };
 
   const normalizeTime = (timeStr: string): string => {
     if (!timeStr) return '00:00:00';
@@ -372,26 +376,83 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
   }, [startTime, activity, activeActivityStandards, activeInProgressEntry]);
 
   useEffect(() => {
-    const checkStatus = async () => {
-      const cleanSerial = serialNo.trim();
-      const cleanActivity = activity.trim();
-      
-      if (cleanSerial.length < 2 || !cleanActivity) { 
-        setLastLog(null); 
-        setIdleGapMinutes(0); 
-        setActiveInProgressEntry(null);
-        return; 
+    let isActive = true;
+
+    const fetchLastLog = async () => {
+      const cleanSerial = debouncedSerialNo.trim();
+
+      if (cleanSerial.length < 2) {
+        if (isActive) {
+          setLastLog(null);
+          setIdleGapMinutes(0);
+        }
+        return;
       }
 
-      setIsFetchingLastLog(true);
       try {
+        const { data, error } = await supabase
+          .from('production_entries')
+          .select('end_time, end_date, production_date, stage, is_gap')
+          .ilike('serial_no', cleanSerial)
+          .eq('status', 'Completed')
+          .neq('is_gap', true)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (!isActive) return;
+
+        if (data && !error && data.end_time) {
+          setLastLog({
+            endTime: data.end_time,
+            endDate: data.end_date || data.production_date,
+            stageName: data.stage
+          });
+        } else {
+          setLastLog(null);
+          setIdleGapMinutes(0);
+        }
+      } catch (err) {
+        if (isActive) {
+          setLastLog(null);
+          setIdleGapMinutes(0);
+        }
+      }
+    };
+
+    fetchLastLog();
+    return () => { isActive = false; };
+
+  }, [debouncedSerialNo]);
+
+  useEffect(() => {
+    let isActive = true;
+
+    const checkInProgress = async () => {
+      const cleanSerial = debouncedSerialNo.trim();
+      const cleanActivity = activity.trim();
+
+      if (cleanSerial.length < 2 || !cleanActivity) {
+        if (isActive) {
+          setActiveInProgressEntry(null);
+          setHasOtherInProgress(false);
+        }
+        return;
+      }
+
+      if (isActive) setIsFetchingLastLog(true);
+
+      try {
+        // Check if THIS serial+activity is In Progress
         const { data: inProgress, error: ipError } = await supabase
           .from('production_entries')
           .select('*')
           .ilike('serial_no', cleanSerial)
-          .eq('stage', activity) 
+          .eq('stage', cleanActivity)
           .eq('status', 'In Progress')
           .maybeSingle();
+
+        if (!isActive) return;
 
         if (inProgress && !ipError) {
           setActiveInProgressEntry({
@@ -423,23 +484,23 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
             lossReason: '',
             notes: inProgress.notes || ''
           });
-          
-          if (inProgress.unit_sr_no && inProgress.unit_sr_no.trim() !== '') {
-            setUnitSrNo(inProgress.unit_sr_no);
-          }
-          if (inProgress.so_sq_no && inProgress.so_sq_no.trim() !== '') {
-            setSoSqNo(inProgress.so_sq_no);
-          }
-          
+
+          if (inProgress.unit_sr_no?.trim()) setUnitSrNo(inProgress.unit_sr_no);
+          if (inProgress.so_sq_no?.trim()) setSoSqNo(inProgress.so_sq_no);
           setProductionDate(inProgress.production_date);
           setStartTime(inProgress.start_time);
+
           const now = new Date();
           setEndDate(scanDate || formatDateISO(now));
-          setEndTime(scanTime || now.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }));
+          setEndTime(scanTime || now.toLocaleTimeString('en-GB', { 
+            hour: '2-digit', minute: '2-digit' 
+          }));
           setScanTime(null);
           setScanDate(null);
+
         } else {
-          setActiveInProgressEntry(null);
+          if (isActive) setActiveInProgressEntry(null);
+
           if (scanTime && scanDate) {
             setStartTime(scanTime);
             setProductionDate(scanDate);
@@ -447,39 +508,37 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
             setScanDate(null);
           } else {
             const now = new Date();
-            const timeStr = now.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
-            setStartTime(timeStr);
+            setStartTime(now.toLocaleTimeString('en-GB', { 
+              hour: '2-digit', minute: '2-digit' 
+            }));
             setProductionDate(formatDateISO(now));
           }
         }
 
-        const { data, error } = await supabase
-          .from('production_entries')
-          .select('end_time, end_date, production_date, stage, is_gap')
-          .ilike('serial_no', cleanSerial)
-          .eq('status', 'Completed')
-          .neq('is_gap', true)
-          .order('created_at', { ascending: false })
-          .limit(1)
-          .maybeSingle();
-
-        if (data && !error && data.end_time) setLastLog({ endTime: data.end_time, endDate: data.end_date || data.production_date, stageName: data.stage });
-        else { setLastLog(null); setIdleGapMinutes(0); }
-
-        // Check if there are OTHER activities already in progress for this serial number
-        // This prevents double-counting the idle gap if multiple activities are started for the same unit.
-        const { data: others, error: othersError } = await supabase
+        // Check OTHER activities In Progress for this serial
+        const { data: others } = await supabase
           .from('production_entries')
           .select('id')
           .ilike('serial_no', cleanSerial)
           .eq('status', 'In Progress')
-          .neq('stage', cleanActivity); // 'stage' column in DB stores the activity name
+          .neq('stage', cleanActivity);
 
+        if (!isActive) return;
         setHasOtherInProgress(others && others.length > 0 ? true : false);
-      } catch (err) { setLastLog(null); setIdleGapMinutes(0); setHasOtherInProgress(false); } finally { setIsFetchingLastLog(false); }
+
+      } catch (err) {
+        if (isActive) {
+          setHasOtherInProgress(false);
+        }
+      } finally {
+        if (isActive) setIsFetchingLastLog(false);
+      }
     };
-    checkStatus();
-  }, [serialNo, activity, scanTrigger]);
+
+    checkInProgress();
+    return () => { isActive = false; };
+
+  }, [debouncedSerialNo, activity, scanTrigger]);
 
   useEffect(() => {
     if (lastLog && startTime && productionDate && !activeInProgressEntry && !hasOtherInProgress) {
@@ -490,7 +549,7 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
     } else {
       setIdleGapMinutes(0);
     }
-  }, [lastLog, startTime, productionDate, serialNo, activeInProgressEntry, hasOtherInProgress]);
+  }, [lastLog, startTime, productionDate, debouncedSerialNo, activeInProgressEntry, hasOtherInProgress]);
 
   useEffect(() => { if (!activeInProgressEntry) setEndDate(productionDate); }, [productionDate, activeInProgressEntry]);
 
@@ -655,7 +714,7 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
             plant: context.plant,
             stage: "Idle / Transition",
             productLine, model, serialNo, unitSrNo, soSqNo,
-            productionDate: productionDate, // Attribution now correctly follows production context
+            productionDate: lastLog.endDate, // Attribution now correctly follows production context
             endDate: productionDate,
             shift: 'Shift 1', activity: "Inter-Activity Idle Time",
             manpower: 1, manpowerNames: [], assignments: [],
@@ -668,7 +727,7 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
             defectCategory: idleAttribution.defectCategory,
             issueDescription: idleAttribution.issueDescription,
             notes: `Gap Audit: ${idleAttribution.issueDescription}`,
-            status: 'Completed', createdAt: new Date().toISOString(), isGap: true
+            status: 'Completed', createdAt: new Date().toISOString(), is_gap: true
           });
         }
 
