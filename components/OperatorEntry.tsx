@@ -244,7 +244,6 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
 
   const [lastLog, setLastLog] = useState<{ endTime: string, endDate: string, stageName: string } | null>(null);
   const [hasOtherInProgress, setHasOtherInProgress] = useState(false);
-  const [idleGapMinutes, setIdleGapMinutes] = useState(0);
   const [isFetchingLastLog, setIsFetchingLastLog] = useState(false);
   const [idleAttribution, setIdleAttribution] = useState({ affectedParameter: '', defectCategory: '', issueDescription: '' });
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -345,6 +344,36 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
     return Math.max(0, totalAvailable);
   };
 
+  const idleGapMinutes = useMemo(() => {
+    if (!lastLog) return 0;
+    if (activeInProgressEntry) return 0;
+    if (hasOtherInProgress) return 0;
+
+    const prevEndMs = toStandardMs(
+      lastLog.endDate, 
+      lastLog.endTime
+    );
+    const currStartMs = toStandardMs(
+      productionDate, 
+      startTime
+    );
+
+    if (isNaN(prevEndMs) || isNaN(currStartMs)) return 0;
+    if (currStartMs <= prevEndMs) return 0;
+
+    const available = calculateAvailableGapMins(
+      prevEndMs, 
+      currStartMs
+    );
+    return available >= 1 ? Math.round(available) : 0;
+  }, [
+    lastLog, 
+    productionDate, 
+    startTime, 
+    activeInProgressEntry, 
+    hasOtherInProgress
+  ]);
+
   const calculatePredictedFinish = (startStr: string, sctMins: number) => {
     const parseMins = (t: string) => { const [h, m] = t.split(':').map(Number); return (h || 0) * 60 + (m || 0); };
     const formatMins = (m: number) => { const h = Math.floor(m / 60) % 24; const mm = m % 60; return `${String(h).padStart(2, '0')}:${String(mm).padStart(2, '0')}`; };
@@ -384,7 +413,6 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
       if (cleanSerial.length < 2) {
         if (isActive) {
           setLastLog(null);
-          setIdleGapMinutes(0);
         }
         return;
       }
@@ -410,12 +438,10 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
           });
         } else {
           setLastLog(null);
-          setIdleGapMinutes(0);
         }
       } catch (err) {
         if (isActive) {
           setLastLog(null);
-          setIdleGapMinutes(0);
         }
       }
     };
@@ -539,17 +565,6 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
     return () => { isActive = false; };
 
   }, [debouncedSerialNo, activity, scanTrigger]);
-
-  useEffect(() => {
-    if (lastLog && startTime && productionDate && !activeInProgressEntry && !hasOtherInProgress) {
-      const prevEndMs = toStandardMs(lastLog.endDate, lastLog.endTime);
-      const currStartMs = toStandardMs(productionDate, startTime);
-      const available = calculateAvailableGapMins(prevEndMs, currStartMs);
-      setIdleGapMinutes(available >= 1 ? Math.round(available) : 0);
-    } else {
-      setIdleGapMinutes(0);
-    }
-  }, [lastLog, startTime, productionDate, debouncedSerialNo, activeInProgressEntry, hasOtherInProgress]);
 
   useEffect(() => { if (!activeInProgressEntry) setEndDate(productionDate); }, [productionDate, activeInProgressEntry]);
 
@@ -788,7 +803,7 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
 
       if (!activeInProgressEntry || entriesToSave.some(e => e.status === 'Completed')) {
         setSerialNo(''); setUnitSrNo(''); setSoSqNo(''); setAssignmentInputs({}); 
-        setIdleGapMinutes(0); setIdleAttribution({ affectedParameter: '', defectCategory: '', issueDescription: '' });
+        setIdleAttribution({ affectedParameter: '', defectCategory: '', issueDescription: '' });
         setUserHasSelectedActivity(false);
         setActiveInProgressEntry(null);
       }
