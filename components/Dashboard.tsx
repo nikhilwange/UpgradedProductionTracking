@@ -681,17 +681,6 @@ const Dashboard: React.FC<DashboardProps> = ({ entries, plant, userRole }) => {
                             </div>
                           )}
                         </div>
-
-                        <div className="flex flex-wrap gap-4">
-                          <div className="bg-blue-50/50 p-6 rounded-3xl border border-blue-100 flex flex-col items-center justify-center text-center min-w-[140px]">
-                            <span className="text-[10px] font-black text-blue-400 mb-2 uppercase tracking-widest">IDLE START</span>
-                            <span className="text-xl font-black text-blue-900">{formatTimeDisplay(node.idleStart)}</span>
-                          </div>
-                          <div className="bg-blue-50/50 p-6 rounded-3xl border border-blue-100 flex flex-col items-center justify-center text-center min-w-[140px]">
-                            <span className="text-[10px] font-black text-blue-400 mb-2 uppercase tracking-widest">IDLE END</span>
-                            <span className="text-xl font-black text-blue-900">{formatTimeDisplay(node.idleEnd)}</span>
-                          </div>
-                        </div>
                       </div>
 
                       <div className="lg:pl-8 lg:border-l border-slate-100 flex flex-col justify-center lg:w-64">

@@ -347,7 +347,6 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
   const idleGapMinutes = useMemo(() => {
     if (!lastLog) return 0;
     if (activeInProgressEntry) return 0;
-    if (hasOtherInProgress) return 0;
 
     const prevEndMs = toStandardMs(
       lastLog.endDate, 
@@ -370,8 +369,7 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
     lastLog, 
     productionDate, 
     startTime, 
-    activeInProgressEntry, 
-    hasOtherInProgress
+    activeInProgressEntry
   ]);
 
   const calculatePredictedFinish = (startStr: string, sctMins: number) => {
