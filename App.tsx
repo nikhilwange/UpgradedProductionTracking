@@ -267,6 +267,7 @@ const App: React.FC = () => {
           issueDescription: item.issue_description,
           notes: item.notes || '',
           status: item.status || 'Completed',
+          is_gap: item.is_gap || false,
           createdAt: item.created_at || new Date().toISOString(),
           userEmail: item.user_email
         })));
@@ -344,6 +345,7 @@ const App: React.FC = () => {
           issue_description: newEntry.issueDescription,
           notes: newEntry.notes || '',
           status: newEntry.status,
+          is_gap: newEntry.is_gap || false,
           user_email: session?.user?.email || 'unknown'
         };
         if (newEntry.id && !isNaN(Number(newEntry.id)) && String(newEntry.id).length < 10) {
@@ -402,7 +404,8 @@ const App: React.FC = () => {
         defect_category: updatedEntry.defectCategory,
         issue_description: updatedEntry.issueDescription,
         notes: updatedEntry.notes || '',
-        status: updatedEntry.status
+        status: updatedEntry.status,
+        is_gap: updatedEntry.is_gap || false
       }).eq('id', Number(updatedEntry.id));
       if (error) throw error;
       fetchCloudData();
@@ -539,7 +542,7 @@ const App: React.FC = () => {
 
         <div className="p-4 md:p-8 max-w-7xl mx-auto w-full">
           {activeTab === 'dashboard' && <Dashboard entries={entries} plant={homePlant} userRole={userRole} />}
-          {activeTab === 'entry' && <OperatorEntry onAddEntry={handleAddEntry} entries={entries} plant={homePlant} />}
+          {activeTab === 'entry' && <OperatorEntry onAddEntry={handleAddEntry} entries={entries} plant={homePlant} userRole={userRole} />}
           {activeTab === 'manpower' && <ManpowerSummary entries={entries} />}
           {activeTab === 'data' && <DataTable entries={entries} onDelete={handleDeleteEntry} isAdmin={isAdmin} />}
           {isAdmin && activeTab === 'admin-manager' && <AdminManager entries={entries} onUpdate={handleUpdateEntry} onDelete={handleDeleteEntry} onClear={fetchCloudData} isAdmin={isAdmin} />}

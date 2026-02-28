@@ -251,9 +251,16 @@ const Dashboard: React.FC<DashboardProps> = ({ entries, plant, userRole }) => {
     const consolidatedActivities: any[] = [];
     const loggedGaps: any[] = [];
 
+    const safeParseMs = (dateStr: string, timeStr: string) => {
+      if (!dateStr || !timeStr) return NaN;
+      const [y, m, d] = dateStr.split('-').map(Number);
+      const [hh, mm] = (timeStr || '00:00').split(':').map(Number);
+      return new Date(y, m - 1, d, hh, mm, 0).getTime();
+    };
+
     prodEntries.forEach(e => {
-      const startMs = new Date(`${e.productionDate}T${e.startTime}`).getTime();
-      const endMs = e.status === 'Completed' ? new Date(`${e.endDate || e.productionDate}T${e.endTime}`).getTime() : Date.now();
+      const startMs = safeParseMs(e.productionDate, e.startTime);
+      const endMs = e.status === 'Completed' ? safeParseMs(e.endDate || e.productionDate, e.endTime) : Date.now();
 
       if (e.activity === "Inter-Activity Idle Time" || e.isGap) {
         loggedGaps.push({ 
@@ -282,47 +289,55 @@ const Dashboard: React.FC<DashboardProps> = ({ entries, plant, userRole }) => {
 
     // Recalculate true start/end times for consolidated activities
     consolidatedActivities.forEach(a => {
-      const firstShift = a.shifts.sort((s1: any, s2: any) => new Date(`${s1.productionDate}T${s1.startTime}`).getTime() - new Date(`${s2.productionDate}T${s2.startTime}`).getTime())[0];
+      const firstShift = a.shifts.sort((s1: any, s2: any) => safeParseMs(s1.productionDate, s1.startTime) - safeParseMs(s2.productionDate, s2.startTime))[0];
       const lastShift = a.shifts.find((s: any) => s.status === 'Completed') || a.shifts[a.shifts.length - 1];
       
       a.startTime = firstShift.startTime;
       a.date = firstShift.productionDate;
       a.endTime = lastShift.status === 'Completed' ? lastShift.endTime : '-';
-      a.startMs = new Date(`${a.date}T${a.startTime}`).getTime();
-      a.endMs = lastShift.status === 'Completed' ? new Date(`${lastShift.endDate || lastShift.productionDate}T${lastShift.endTime}`).getTime() : Date.now();
+      a.startMs = safeParseMs(a.date, a.startTime);
+      a.endMs = lastShift.status === 'Completed' ? safeParseMs(lastShift.endDate || lastShift.productionDate, lastShift.endTime) : Date.now();
     });
 
     // Stage 2: Identify implicit gaps
     const implicitGaps: any[] = [];
     const allNodes = [...consolidatedActivities, ...loggedGaps].sort((a, b) => a.startMs - b.startMs);
     const inProgressActivity = consolidatedActivities.find(a => a.shifts.some((s: any) => s.status === 'In Progress'));
+    
+    if (allNodes.length > 0) {
+      let maxEndMs = allNodes[0].endMs;
+      let lastNodeWithMaxEnd = allNodes[0];
 
-    for (let i = 0; i < allNodes.length - 1; i++) {
-      const currentNode = allNodes[i];
-      const nextNode = allNodes[i + 1];
-      const gapStartMs = currentNode.endMs;
-      const gapEndMs = nextNode.startMs;
+      for (let i = 1; i < allNodes.length; i++) {
+        const currentNode = allNodes[i];
+        const gapStartMs = maxEndMs;
+        const gapEndMs = currentNode.startMs;
 
-      if (gapEndMs > gapStartMs + 60000) { // More than 1 min gap
-        // If an activity is in progress, do not create new implicit gaps after it has started
-        if (inProgressActivity && gapStartMs >= inProgressActivity.startMs) continue;
+        if (gapEndMs > gapStartMs + 60000) { // More than 1 min gap
+          if (inProgressActivity && gapStartMs >= inProgressActivity.startMs) continue;
 
-        const m = selectedModelFilter.toUpperCase();
-        const customBreaks = (['LI7', 'LI7 PCA', '2X', '3X', 'STS'].includes(m)) ? AMBERNATH_BREAK_TIMES : undefined;
-        const workingGapMins = calculateAvailableMinutes(gapStartMs, gapEndMs, customBreaks);
-        const wallClockMins = (gapEndMs - gapStartMs) / 60000;
+          const m = selectedModelFilter.toUpperCase();
+          const customBreaks = (['LI7', 'LI7 PCA', '2X', '3X', 'STS'].includes(m)) ? AMBERNATH_BREAK_TIMES : undefined;
+          const workingGapMins = calculateAvailableMinutes(gapStartMs, gapEndMs, customBreaks);
+          const wallClockMins = (gapEndMs - gapStartMs) / 60000;
 
-        if (workingGapMins >= 15 || wallClockMins >= 60) {
-          implicitGaps.push({
-            type: 'gap',
-            startMs: gapStartMs,
-            endMs: gapEndMs,
-            idleStart: currentNode.type === 'gap' ? currentNode.shifts[0].endTime : currentNode.endTime,
-            idleEnd: nextNode.type === 'gap' ? nextNode.shifts[0].startTime : nextNode.startTime,
-            lossHours: ((workingGapMins || wallClockMins) / 60).toFixed(2),
-            date: new Date(gapStartMs).toISOString().split('T')[0],
-            isLogged: false,
-          });
+          if (workingGapMins >= 1 || wallClockMins >= 1) {
+            implicitGaps.push({
+              type: 'gap',
+              startMs: gapStartMs,
+              endMs: gapEndMs,
+              idleStart: lastNodeWithMaxEnd.type === 'gap' ? lastNodeWithMaxEnd.shifts[0].endTime : lastNodeWithMaxEnd.endTime,
+              idleEnd: currentNode.type === 'gap' ? currentNode.shifts[0].startTime : currentNode.startTime,
+              lossHours: ((workingGapMins || wallClockMins) / 60).toFixed(2),
+              date: new Date(gapStartMs - new Date(gapStartMs).getTimezoneOffset() * 60000).toISOString().split('T')[0],
+              isLogged: false,
+            });
+          }
+        }
+
+        if (currentNode.endMs > maxEndMs) {
+          maxEndMs = currentNode.endMs;
+          lastNodeWithMaxEnd = currentNode;
         }
       }
     }

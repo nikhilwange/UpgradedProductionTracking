@@ -27,6 +27,7 @@ interface OperatorEntryProps {
   onAddEntry: (entries: ProductionEntry | ProductionEntry[]) => void;
   entries: ProductionEntry[];
   plant: string;
+  userRole?: string;
 }
 
 const fromMins = (mins: number) => {
@@ -49,7 +50,8 @@ const FormDateTimeInput: React.FC<{
   className?: string;
   paddingY?: string;
   disabled?: boolean;
-}> = ({ type, value, onChange, className, paddingY = 'py-2', disabled = false }) => {
+  readOnly?: boolean;
+}> = ({ type, value, onChange, className, paddingY = 'py-2', disabled = false, readOnly = false }) => {
   const [isManual, setIsManual] = useState(false);
   const formatDisplay = (val: string) => {
     if (!val) return type === 'date' ? 'DD-MM-YYYY' : 'HH:MM';
@@ -60,6 +62,7 @@ const FormDateTimeInput: React.FC<{
     return `${d}-${m}-${y}`;
   };
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (readOnly) return;
     let val = e.target.value;
     if (type === 'time') {
       const digits = val.replace(/\D/g, '').slice(0, 4);
@@ -72,11 +75,11 @@ const FormDateTimeInput: React.FC<{
     const now = new Date();
     const timeStr = now.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
     onChange(timeStr);
-    setIsManual(true);
+    if (!readOnly) setIsManual(true);
   };
   return (
     <div className={`flex flex-col gap-2 ${className}`}>
-      <div className={`relative group ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`} onDoubleClick={() => !disabled && setIsManual(!isManual)}>
+      <div className={`relative group ${disabled ? 'opacity-50 cursor-not-allowed' : ''} ${readOnly ? 'cursor-default' : ''}`} onDoubleClick={() => !disabled && !readOnly && setIsManual(!isManual)}>
         {!isManual && (
           <div className={`w-full px-4 ${paddingY} pr-10 bg-white border border-slate-200 rounded-[1.5rem] flex items-center shadow-sm pointer-events-none z-0`}>
             <span className="text-sm font-bold text-[#002060]">{formatDisplay(value)}</span>
@@ -91,29 +94,32 @@ const FormDateTimeInput: React.FC<{
           type={isManual ? (type === 'time' ? 'tel' : 'text') : type}
           value={value}
           disabled={disabled}
+          readOnly={readOnly}
           onChange={handleInputChange}
           inputMode={type === 'time' ? 'numeric' : undefined}
           className={`w-full outline-none text-sm font-bold text-[#002060] rounded-[1.5rem] border transition-all appearance-none ${
             isManual ? 'relative z-20 px-4 py-2 border-blue-400 bg-white shadow-md pr-10' : 'absolute inset-0 opacity-0 z-10 cursor-pointer h-full border-slate-200'
-          }`}
+          } ${readOnly ? 'cursor-default' : ''}`}
         />
       </div>
       {type === 'time' && !disabled && (
         <div className="flex flex-col items-center gap-2 px-1">
           <button type="button" onClick={setTimeToNow} className="w-full py-1.5 bg-blue-600 text-white text-[9px] font-black uppercase tracking-widest rounded-full hover:bg-blue-700 shadow-sm active:scale-95">NOW</button>
-          <p className="text-[10px] text-slate-400 font-medium italic text-center leading-tight mt-1">
-            *Double-tap to enter / Double-tap to exit manual mode*
-          </p>
+          {!readOnly && (
+            <p className="text-[10px] text-slate-400 font-medium italic text-center leading-tight mt-1">
+              *Double-tap to enter / Double-tap to exit manual mode*
+            </p>
+          )}
         </div>
       )}
     </div>
   );
 };
 
-const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plant }) => {
+const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plant, userRole }) => {
+  const isAdmin = userRole === 'admin';
   const [serialNo, setSerialNo] = useState('');
   const [unitSrNo, setUnitSrNo] = useState('');
-  const [userHasSelectedActivity, setUserHasSelectedActivity] = useState(false);
   const [showSuccessOverlay, setShowSuccessOverlay] = useState(false);
   
   const filteredModels = useMemo(() => {
@@ -214,8 +220,11 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
   }, [entries, serialNo, activity]);
 
   const [soSqNo, setSoSqNo] = useState('');
-  const [productionDate, setProductionDate] = useState(new Date().toISOString().split('T')[0]);
-  const [endDate, setEndDate] = useState(new Date().toISOString().split('T')[0]);
+  const [scanTime, setScanTime] = useState<string | null>(null);
+  const [scanDate, setScanDate] = useState<string | null>(null);
+  const [scanTrigger, setScanTrigger] = useState(0);
+  const [productionDate, setProductionDate] = useState(formatDateISO(new Date()));
+  const [endDate, setEndDate] = useState(formatDateISO(new Date()));
   const [startTime, setStartTime] = useState('09:00');
   const [endTime, setEndTime] = useState('10:00');
   
@@ -229,6 +238,7 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
   const [isFetchingLastLog, setIsFetchingLastLog] = useState(false);
   const [idleAttribution, setIdleAttribution] = useState({ affectedParameter: '', defectCategory: '', issueDescription: '' });
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [userHasSelectedActivity, setUserHasSelectedActivity] = useState(false);
 
   const toMins = (time: string) => {
     if (!time) return 0;
@@ -253,10 +263,10 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
   const toStandardMs = (dateStr: string, timeStr: string): number => {
     if (!dateStr || !timeStr) return NaN;
     try {
-      const formattedTime = normalizeTime(timeStr);
-      const isoStr = `${dateStr.trim()}T${formattedTime}`;
-      const ms = new Date(isoStr).getTime();
-      return isNaN(ms) ? NaN : ms;
+      const [y, m, d] = dateStr.split('-').map(Number);
+      const [hh, mm] = timeStr.split(':').map(Number);
+      const date = new Date(y, m - 1, d, hh, mm, 0);
+      return date.getTime();
     } catch (e) { return NaN; }
   };
 
@@ -366,7 +376,7 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
       const cleanSerial = serialNo.trim();
       const cleanActivity = activity.trim();
       
-      if (cleanSerial.length < 2 || !cleanActivity || !userHasSelectedActivity) { 
+      if (cleanSerial.length < 2 || !cleanActivity) { 
         setLastLog(null); 
         setIdleGapMinutes(0); 
         setActiveInProgressEntry(null);
@@ -424,25 +434,32 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
           setProductionDate(inProgress.production_date);
           setStartTime(inProgress.start_time);
           const now = new Date();
-          setEndDate(now.toISOString().split('T')[0]);
-          setEndTime(now.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }));
+          setEndDate(scanDate || formatDateISO(now));
+          setEndTime(scanTime || now.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }));
+          setScanTime(null);
+          setScanDate(null);
         } else {
           setActiveInProgressEntry(null);
-          const now = new Date();
-          const timeStr = now.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
-          setStartTime(timeStr);
-          setProductionDate(now.toISOString().split('T')[0]);
+          if (scanTime && scanDate) {
+            setStartTime(scanTime);
+            setProductionDate(scanDate);
+            setScanTime(null);
+            setScanDate(null);
+          } else {
+            const now = new Date();
+            const timeStr = now.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+            setStartTime(timeStr);
+            setProductionDate(formatDateISO(now));
+          }
         }
 
-        // QUERY UPDATED: Using production_date and end_time for robust logical sorting
         const { data, error } = await supabase
           .from('production_entries')
-          .select('end_time, end_date, production_date, stage')
+          .select('end_time, end_date, production_date, stage, is_gap')
           .ilike('serial_no', cleanSerial)
           .eq('status', 'Completed')
-          .neq('stage', 'Inter-Activity Idle Time')
-          .order('production_date', { ascending: false })
-          .order('end_time', { ascending: false })
+          .neq('is_gap', true)
+          .order('created_at', { ascending: false })
           .limit(1)
           .maybeSingle();
 
@@ -462,25 +479,22 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
       } catch (err) { setLastLog(null); setIdleGapMinutes(0); setHasOtherInProgress(false); } finally { setIsFetchingLastLog(false); }
     };
     checkStatus();
-  }, [serialNo, activity, userHasSelectedActivity]);
+  }, [serialNo, activity, scanTrigger]);
 
   useEffect(() => {
-    if (lastLog && startTime && productionDate && !activeInProgressEntry && userHasSelectedActivity && !hasOtherInProgress) {
+    if (lastLog && startTime && productionDate && !activeInProgressEntry && !hasOtherInProgress) {
       const prevEndMs = toStandardMs(lastLog.endDate, lastLog.endTime);
       const currStartMs = toStandardMs(productionDate, startTime);
       const available = calculateAvailableGapMins(prevEndMs, currStartMs);
-      setIdleGapMinutes(available > 0 ? Math.round(available) : 0);
-    } else setIdleGapMinutes(0);
-  }, [lastLog, startTime, productionDate, serialNo, activeInProgressEntry, userHasSelectedActivity, hasOtherInProgress]);
+      setIdleGapMinutes(available >= 1 ? Math.round(available) : 0);
+    } else {
+      setIdleGapMinutes(0);
+    }
+  }, [lastLog, startTime, productionDate, serialNo, activeInProgressEntry, hasOtherInProgress]);
 
   useEffect(() => { if (!activeInProgressEntry) setEndDate(productionDate); }, [productionDate, activeInProgressEntry]);
 
   const calculateNetInWindow = (start: number, end: number, winStart: number, winEnd: number, dateStr?: string) => {
-    if (dateStr) {
-      if (HOLIDAYS_LIST.includes(dateStr)) return 0;
-      const d = new Date(`${dateStr}T00:00:00`);
-      if (d.getDay() === 0) return 0;
-    }
     const s = Math.max(start, winStart);
     const e = Math.min(end, winEnd);
     if (s >= e) return 0;
@@ -491,7 +505,11 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
       if (b.name === 'Non Working Hours') return;
       const os = Math.max(s, bs);
       const oe = Math.min(e, be);
-      if (os < oe) totalBreakMins += (oe - os);
+      if (os < oe) {
+        if (s <= bs && e >= be) {
+          totalBreakMins += (be - bs);
+        }
+      }
     });
     return (e - s) - totalBreakMins;
   };
@@ -507,18 +525,19 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
     
     while (d <= endD) {
       const dateStr = formatDateISO(d);
-      const isSunday = d.getDay() === 0;
-      if (isSunday || HOLIDAYS_LIST.includes(dateStr)) { d.setDate(d.getDate() + 1); continue; }
       const dayStart = new Date(`${dateStr}T00:00:00`).getTime();
       const relStart = Math.max(0, (startMs - dayStart) / 60000);
       const relEnd = Math.min(1440, (endMs - dayStart) / 60000);
       if (relStart < relEnd) {
-        const s1Mins = calculateNetInWindow(relStart, relEnd, activeShiftBoundaries.s1Start, activeShiftBoundaries.s1End, dateStr);
-        if (s1Mins > 0) assignments.push({ date: dateStr, shift: 'Shift 1', minutes: s1Mins, segStart: fromMins(Math.max(relStart, activeShiftBoundaries.s1Start)), segEnd: fromMins(Math.min(relEnd, activeShiftBoundaries.s1End)) });
+        const hasShift2 = activeShiftBoundaries.s2Start > 0;
+        const splitPoint = hasShift2 ? (activeShiftBoundaries.s1End || 930) : 1440;
         
-        if (activeShiftBoundaries.s2Start > 0) {
-          const s2Mins = calculateNetInWindow(relStart, relEnd, activeShiftBoundaries.s2Start, activeShiftBoundaries.s2End, dateStr);
-          if (s2Mins > 0) assignments.push({ date: dateStr, shift: 'Shift 2', minutes: s2Mins, segStart: fromMins(Math.max(relStart, activeShiftBoundaries.s2Start)), segEnd: fromMins(Math.min(relEnd, activeShiftBoundaries.s2End)) });
+        const s1Mins = calculateNetInWindow(relStart, relEnd, 0, splitPoint, dateStr);
+        if (s1Mins > 0) assignments.push({ date: dateStr, shift: 'Shift 1', minutes: s1Mins, segStart: fromMins(Math.max(relStart, 0)), segEnd: fromMins(Math.min(relEnd, splitPoint)) });
+        
+        if (hasShift2) {
+          const s2Mins = calculateNetInWindow(relStart, relEnd, splitPoint, 1440, dateStr);
+          if (s2Mins > 0) assignments.push({ date: dateStr, shift: 'Shift 2', minutes: s2Mins, segStart: fromMins(Math.max(relStart, splitPoint)), segEnd: fromMins(Math.min(relEnd, 1440)) });
         }
       }
       d.setDate(d.getDate() + 1);
@@ -566,7 +585,17 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
 
   const handleScanResult = (text: string) => {
     const parts = text.split('|').map(p => p.trim());
-    setUserHasSelectedActivity(false);
+    
+    // Capture real-time of the scan
+    const now = new Date();
+    const timeStr = now.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+    const dateStr = formatDateISO(now);
+    setScanTime(timeStr);
+    setScanDate(dateStr);
+    setStartTime(timeStr);
+    setProductionDate(dateStr);
+    setScanTrigger(prev => prev + 1);
+    setUserHasSelectedActivity(true);
 
     const findMatchingValue = (list: string[], scannedValue: string) => {
       if (!scannedValue) return null;
@@ -701,6 +730,7 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
       if (!activeInProgressEntry || entriesToSave.some(e => e.status === 'Completed')) {
         setSerialNo(''); setUnitSrNo(''); setSoSqNo(''); setAssignmentInputs({}); 
         setIdleGapMinutes(0); setIdleAttribution({ affectedParameter: '', defectCategory: '', issueDescription: '' });
+        setUserHasSelectedActivity(false);
         setActiveInProgressEntry(null);
       }
     } finally { setIsSubmitting(false); }
@@ -766,7 +796,7 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
                <label className="text-xs font-bold text-slate-500 uppercase flex items-center gap-2 ml-1">
                  <CalendarDays size={14} className="text-blue-500" /> Commencement Date
                </label>
-               <FormDateTimeInput type="date" value={productionDate} onChange={setProductionDate} disabled={!!activeInProgressEntry} />
+               <FormDateTimeInput type="date" value={productionDate} onChange={setProductionDate} disabled={!!activeInProgressEntry} readOnly={!isAdmin} />
              </div>
              <div className="space-y-2">
                <label className="text-xs font-bold text-slate-500 uppercase flex items-center gap-2 ml-1">
@@ -803,7 +833,7 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
                  <Tag size={14} className="text-blue-500" /> Serial Number
                </label>
                <div className="relative">
-                 <input type="text" list="serial-no-list" value={serialNo} onChange={(e) => { setSerialNo(e.target.value); setUserHasSelectedActivity(true); }} placeholder="SN..." className="w-full pl-4 py-2 bg-white border border-slate-200 rounded-[1.5rem] text-sm font-bold shadow-sm text-[#002060]" required />
+                 <input type="text" list="serial-no-list" value={serialNo} onChange={(e) => { setSerialNo(e.target.value); setUserHasSelectedActivity(true); setScanTime(null); setScanDate(null); }} placeholder="SN..." className="w-full pl-4 py-2 bg-white border border-slate-200 rounded-[1.5rem] text-sm font-bold shadow-sm text-[#002060]" required />
                  {isFetchingLastLog && <Loader2 size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-blue-500 animate-spin" />}
                  <datalist id="serial-no-list">{SERIAL_NUMBERS_LIST.map(sn => <option key={sn} value={sn} />)}</datalist>
                </div>
@@ -821,7 +851,7 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
                <label className="text-xs font-bold text-slate-500 uppercase flex items-center gap-2 ml-1">
                  <Layout size={14} className="text-blue-500" /> Select Stage
                </label>
-               <select value={stage} onChange={(e) => { const nextStage = e.target.value; setStage(nextStage); setActivity(activeStageMapping[nextStage][0]); setUserHasSelectedActivity(true); }} className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl text-sm font-bold text-[#002060]">
+               <select value={stage} onChange={(e) => { const nextStage = e.target.value; setStage(nextStage); setActivity(activeStageMapping[nextStage][0]); setUserHasSelectedActivity(true); setScanTime(null); setScanDate(null); }} className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl text-sm font-bold text-[#002060]">
                  {activeStagesList.map(s => <option key={s} value={s}>{s}</option>)}
                </select>
              </div>
@@ -829,7 +859,7 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
                <label className="text-xs font-bold text-slate-500 uppercase flex items-center gap-2 ml-1">
                  <Activity size={14} className="text-blue-500" /> Production Activity
                </label>
-               <select value={activity} onChange={(e) => { setActivity(e.target.value); setUserHasSelectedActivity(true); }} className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl text-sm font-bold text-[#002060]">
+               <select value={activity} onChange={(e) => { setActivity(e.target.value); setUserHasSelectedActivity(true); setScanTime(null); setScanDate(null); }} className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl text-sm font-bold text-[#002060]">
                  {(activeStageMapping[stage] || []).map(a => <option key={a} value={a}>{a}</option>)}
                </select>
              </div>
@@ -867,7 +897,7 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
                 <ArrowRight size={14} className="text-blue-500" /> Commencement
               </label>
               <div className="grid grid-cols-2 gap-3">
-                <FormDateTimeInput type="date" value={productionDate} onChange={setProductionDate} paddingY="py-3" disabled={!!activeInProgressEntry} /><FormDateTimeInput type="time" value={startTime} onChange={setStartTime} paddingY="py-3" disabled={!!activeInProgressEntry} />
+                <FormDateTimeInput type="date" value={productionDate} onChange={setProductionDate} paddingY="py-3" disabled={!!activeInProgressEntry} readOnly={!isAdmin} /><FormDateTimeInput type="time" value={startTime} onChange={setStartTime} paddingY="py-3" disabled={!!activeInProgressEntry} readOnly={!isAdmin} />
               </div>
             </div>
             <div className="space-y-4">
@@ -875,7 +905,7 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
                 <CheckCircle2 size={14} className="text-emerald-500" /> Completion
               </label>
               <div className="grid grid-cols-2 gap-3">
-                <FormDateTimeInput type="date" value={endDate} onChange={setEndDate} paddingY="py-3" disabled={!activeInProgressEntry} /><FormDateTimeInput type="time" value={endTime} onChange={setEndTime} paddingY="py-3" disabled={!activeInProgressEntry} />
+                <FormDateTimeInput type="date" value={endDate} onChange={setEndDate} paddingY="py-3" disabled={!activeInProgressEntry} readOnly={!isAdmin} /><FormDateTimeInput type="time" value={endTime} onChange={setEndTime} paddingY="py-3" disabled={!activeInProgressEntry} readOnly={!isAdmin} />
               </div>
             </div>
           </div>

@@ -43,7 +43,7 @@ export interface ProductionEntry {
   status: 'Completed' | 'In Progress';
   createdAt: string; 
   userEmail?: string;
-  isGap?: boolean; 
+  is_gap?: boolean; 
   isParallel?: boolean;
 }
 
