@@ -422,18 +422,38 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
           .ilike('serial_no', cleanSerial)
           .eq('status', 'Completed')
           .neq('is_gap', true)
-          .order('created_at', { ascending: false })
+          .order('production_date', { ascending: false })
+          .order('end_time', { ascending: false })
           .limit(1)
           .maybeSingle();
 
         if (!isActive) return;
 
         if (data && !error && data.end_time) {
-          setLastLog({
-            endTime: data.end_time,
-            endDate: data.end_date || data.production_date,
-            stageName: data.stage
-          });
+          // Before setting lastLog, check if a gap record
+          // already exists starting from this same end_time.
+          // This prevents duplicate gaps when two activities
+          // are started in sequence after the same completed entry.
+          const { data: existingGap } = await supabase
+            .from('production_entries')
+            .select('id')
+            .ilike('serial_no', cleanSerial)
+            .eq('is_gap', true)
+            .eq('start_time', data.end_time)
+            .maybeSingle();
+
+          if (!isActive) return;
+
+          if (existingGap) {
+            // Gap already logged for this window — suppress
+            setLastLog(null);
+          } else {
+            setLastLog({
+              endTime: data.end_time,
+              endDate: data.end_date || data.production_date,
+              stageName: data.stage
+            });
+          }
         } else {
           setLastLog(null);
         }
@@ -623,7 +643,7 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
           date: dateStr, 
           shift: 'Shift 1', 
           minutes: s1Mins, 
-          segStart: fromMins(Math.max(relStart, 0)), 
+          segStart: fromMins(Math.max(relStart, activeShiftBoundaries.s1Start)), 
           segEnd: fromMins(Math.min(relEnd, splitPoint)) 
         });
 
@@ -634,7 +654,7 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
             shift: 'Shift 2', 
             minutes: s2Mins, 
             segStart: fromMins(Math.max(relStart, splitPoint)), 
-            segEnd: fromMins(Math.min(relEnd, 1440)) 
+            segEnd: fromMins(Math.min(relEnd, activeShiftBoundaries.s2End || S2_END)) 
           });
         }
       }
