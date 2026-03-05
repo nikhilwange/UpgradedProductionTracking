@@ -597,19 +597,45 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
     
     while (d <= endD) {
       const dateStr = formatDateISO(d);
+      const isSunday = d.getDay() === 0;
+      const isHoliday = HOLIDAYS_LIST.includes(dateStr);
+      const isStartDate = dateStr === productionDate;
+      const isEndDate = dateStr === endDate;
+
+      // Skip Sundays and holidays UNLESS the operator 
+      // actually started or ended work on that day — 
+      // which proves the plant was operating.
+      if ((isSunday || isHoliday) && !isStartDate && !isEndDate) {
+        d.setDate(d.getDate() + 1);
+        continue;
+      }
+
       const dayStart = new Date(`${dateStr}T00:00:00`).getTime();
       const relStart = Math.max(0, (startMs - dayStart) / 60000);
       const relEnd = Math.min(1440, (endMs - dayStart) / 60000);
+
       if (relStart < relEnd) {
         const hasShift2 = activeShiftBoundaries.s2Start > 0;
         const splitPoint = hasShift2 ? (activeShiftBoundaries.s1End || 930) : 1440;
-        
+
         const s1Mins = calculateNetInWindow(relStart, relEnd, 0, splitPoint, dateStr);
-        if (s1Mins > 0) assignments.push({ date: dateStr, shift: 'Shift 1', minutes: s1Mins, segStart: fromMins(Math.max(relStart, 0)), segEnd: fromMins(Math.min(relEnd, splitPoint)) });
-        
+        if (s1Mins > 0) assignments.push({ 
+          date: dateStr, 
+          shift: 'Shift 1', 
+          minutes: s1Mins, 
+          segStart: fromMins(Math.max(relStart, 0)), 
+          segEnd: fromMins(Math.min(relEnd, splitPoint)) 
+        });
+
         if (hasShift2) {
           const s2Mins = calculateNetInWindow(relStart, relEnd, splitPoint, 1440, dateStr);
-          if (s2Mins > 0) assignments.push({ date: dateStr, shift: 'Shift 2', minutes: s2Mins, segStart: fromMins(Math.max(relStart, splitPoint)), segEnd: fromMins(Math.min(relEnd, 1440)) });
+          if (s2Mins > 0) assignments.push({ 
+            date: dateStr, 
+            shift: 'Shift 2', 
+            minutes: s2Mins, 
+            segStart: fromMins(Math.max(relStart, splitPoint)), 
+            segEnd: fromMins(Math.min(relEnd, 1440)) 
+          });
         }
       }
       d.setDate(d.getDate() + 1);
