@@ -95,7 +95,7 @@ Group losses by their recorded reason (Production Delay, Absenteeism, Material S
 Give exactly 4 recommendations. Rank them by priority (1 = highest impact, act now). For each: state the specific problem it solves, the expected benefit, and one concrete first action. Avoid generic consulting advice — recommendations must be grounded in the actual data provided.
 
 FORMATTING: Clean text only. No markdown bold (*). No hashtags (#). Use dashes (-) for bullets. Keep each section concise — executives read fast.`;
-      const response = await ai.models.generateContent({ model: 'gemini-3.1-pro-preview', contents: prompt });
+      const response = await ai.models.generateContent({ model: 'gemini-3-flash-preview', contents: prompt });
       setInsight(response.text || "No insights available.");
     } catch (error: any) {
       const msg = error?.message || error?.toString() || 'Unknown error';
@@ -119,35 +119,8 @@ FORMATTING: Clean text only. No markdown bold (*). No hashtags (#). Use dashes (
       if (lines.length === 0 || !lines[0]) return null;
       const title = lines[0].replace(/^[1-9]\.\s?/, '').trim();
       const content = lines.slice(1);
-      if (idx === 0) {
-        const today = new Date().toLocaleDateString('en-IN', { day: '2-digit', month: '2-digit', year: 'numeric' });
-        return (
-          <div key="header" className="md:col-span-2 bg-gradient-to-r from-slate-900 to-slate-800 rounded-2xl p-6 mb-2 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-            <div className="flex items-center gap-4">
-              <div className="p-2.5 bg-white/10 rounded-xl border border-white/10">
-                <ClipboardCheck size={20} className="text-white" />
-              </div>
-              <div>
-                <h3 className="text-[15px] font-black text-white uppercase tracking-widest leading-none mb-1">
-                  Executive Operations Report
-                </h3>
-                <p className="text-[12px] text-slate-400 font-semibold">
-                  {filteredEntries.length} records analysed · Vertiv India Manufacturing
-                </p>
-              </div>
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
-              {selectedPlant && <span className="px-2.5 py-1 bg-blue-500/20 text-blue-300 rounded-lg text-[11px] font-black border border-blue-500/20 uppercase">{selectedPlant}</span>}
-              {selectedModel && <span className="px-2.5 py-1 bg-indigo-500/20 text-indigo-300 rounded-lg text-[11px] font-black border border-indigo-500/20 uppercase">{selectedModel}</span>}
-              {selectedSerial && <span className="px-2.5 py-1 bg-violet-500/20 text-violet-300 rounded-lg text-[11px] font-black border border-violet-500/20 uppercase">{selectedSerial}</span>}
-              {(dateFrom || dateTo) && <span className="px-2.5 py-1 bg-slate-500/20 text-slate-300 rounded-lg text-[11px] font-black border border-slate-500/30">{dateFrom || '...'} → {dateTo || '...'}</span>}
-              {!selectedPlant && !selectedModel && !selectedSerial && !dateFrom && !dateTo && (
-                <span className="px-2.5 py-1 bg-white/10 text-slate-300 rounded-lg text-[11px] font-black border border-white/10 uppercase">Full Dataset</span>
-              )}
-              <span className="px-2.5 py-1 bg-white/5 text-slate-400 rounded-lg text-[11px] font-semibold border border-white/10">{today}</span>
-            </div>
-          </div>
-        );
+      if (!title && idx === 0 && lines.length > 0) {
+        return <div key="intro" className="md:col-span-2 p-6 bg-slate-100 rounded-2xl border border-slate-200 mb-4">{lines.map((line, lidx) => <p key={lidx} className="text-sm font-semibold text-slate-700">{line.trim()}</p>)}</div>;
       }
       if (!title) return null;
       const getIcon = (t: string) => {
