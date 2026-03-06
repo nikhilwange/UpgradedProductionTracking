@@ -69,8 +69,10 @@ const GeminiInsights: React.FC<GeminiInsightsProps> = ({ entries }) => {
       FORMATTING: Clean text only. No markdown bolding (*). No hashtags (#). Use simple dashes (-) for bullets.`;
       const response = await ai.models.generateContent({ model: 'gemini-3.1-pro-preview', contents: prompt });
       setInsight(response.text || "No insights available.");
-    } catch (error) {
-      setInsight("Error generating Ai insights. Please check configuration.");
+    } catch (error: any) {
+      const msg = error?.message || error?.toString() || 'Unknown error';
+      setInsight(`Error: ${msg}`);
+      console.error('GeminiInsights error:', error);
     } finally { setLoading(false); }
   };
 
