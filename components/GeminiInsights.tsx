@@ -113,7 +113,7 @@ FORMATTING: Clean text only. No markdown bold (*). No hashtags (#). Use dashes (
 
   const renderFormattedInsight = (text: string) => {
     const sanitizedText = text.replace(/[#*]/g, '');
-    const sections = sanitizedText.split(/(?=^[1-9]\.\s)/m);
+    const sections = sanitizedText.split(/(?=^\d\.\s+[A-Z]{2,})/m);
     return sections.map((section, idx) => {
       const lines = section.trim().split('\n');
       if (lines.length === 0 || !lines[0]) return null;
