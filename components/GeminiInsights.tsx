@@ -62,11 +62,39 @@ const GeminiInsights: React.FC<GeminiInsightsProps> = ({ entries }) => {
     setLoading(true);
     try {
       const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-      const prompt = `Act as an Executive Industrial Consultant. Analyze the following manufacturing data for Vertiv (Industrial Cooling Units). 
-      DATA: ${JSON.stringify(filteredEntries.slice(-100).map(e => ({ stage: e.stage, activity: e.activity, variance: e.variance, loss: e.lossHours, reason: e.lossReason })), null, 2)}
-      TASK: Generate a professional executive report. Use these EXACT headers: 1. PERFORMANCE SCORECARD, 2. CRITICAL BOTTLENECKS, 3. ROOT CAUSE ANALYSIS, 4. STRATEGIC RECOMMENDATIONS.
-      TERMINOLOGY: 'Stage' refers to a production group/section. 'Activity' refers to a specific task within that stage.
-      FORMATTING: Clean text only. No markdown bolding (*). No hashtags (#). Use simple dashes (-) for bullets.`;
+      const prompt = `You are a Senior Operations Director with 20 years of experience in industrial manufacturing. 
+Analyze the following production data for Vertiv India (Industrial Cooling Units — Chillers, PDX, FWU product lines).
+
+DATA: ${JSON.stringify(filteredEntries.slice(-100).map(e => ({ 
+  date: e.productionDate, 
+  serial: e.serialNo,
+  model: e.model,
+  stage: e.stage, 
+  activity: e.activity, 
+  shift: e.shift,
+  varianceMins: e.variance, 
+  lossHrs: e.lossHours, 
+  reason: e.lossReason,
+  description: e.issueDescription
+})), null, 2)}
+
+UNITS: variance is in MINUTES (positive = delay, negative = ahead of schedule). lossHrs is in HOURS. Always express variance in hours (divide by 60). Never use the word "units" for measurements.
+
+TASK: Generate a sharp, data-driven executive operations report using EXACTLY these four sections:
+
+1. PERFORMANCE SCORECARD
+Present a quick-read scorecard. Include: total loss hours, total variance hours, top 3 worst activities by loss, top 3 worst activities by variance, any activities running ahead of standard (negative variance). Be specific with numbers.
+
+2. CRITICAL BOTTLENECKS
+Identify the top 3-4 bottlenecks only. For each: name the exact stage and activity, state the loss hours, state the likely operational impact on downstream stages. Reference specific serial numbers or models if the data supports it. Do not list more than 4 bottlenecks.
+
+3. ROOT CAUSE ANALYSIS
+Group losses by their recorded reason (Production Delay, Absenteeism, Material Shortage, etc.). State what percentage or share each cause represents. Identify if losses are concentrated in a particular shift, model, or date range. Call out any activities where loss is recorded as Standard Operation — these indicate inaccurate standard times.
+
+4. STRATEGIC RECOMMENDATIONS
+Give exactly 4 recommendations. Rank them by priority (1 = highest impact, act now). For each: state the specific problem it solves, the expected benefit, and one concrete first action. Avoid generic consulting advice — recommendations must be grounded in the actual data provided.
+
+FORMATTING: Clean text only. No markdown bold (*). No hashtags (#). Use dashes (-) for bullets. Keep each section concise — executives read fast.`;
       const response = await ai.models.generateContent({ model: 'gemini-3.1-pro-preview', contents: prompt });
       setInsight(response.text || "No insights available.");
     } catch (error: any) {
@@ -91,8 +119,35 @@ const GeminiInsights: React.FC<GeminiInsightsProps> = ({ entries }) => {
       if (lines.length === 0 || !lines[0]) return null;
       const title = lines[0].replace(/^[1-9]\.\s?/, '').trim();
       const content = lines.slice(1);
-      if (!title && idx === 0 && lines.length > 0) {
-        return <div key="intro" className="md:col-span-2 p-6 bg-slate-100 rounded-2xl border border-slate-200 mb-4">{lines.map((line, lidx) => <p key={lidx} className="text-sm font-semibold text-slate-700">{line.trim()}</p>)}</div>;
+      if (idx === 0) {
+        const today = new Date().toLocaleDateString('en-IN', { day: '2-digit', month: '2-digit', year: 'numeric' });
+        return (
+          <div key="header" className="md:col-span-2 bg-gradient-to-r from-slate-900 to-slate-800 rounded-2xl p-6 mb-2 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div className="flex items-center gap-4">
+              <div className="p-2.5 bg-white/10 rounded-xl border border-white/10">
+                <ClipboardCheck size={20} className="text-white" />
+              </div>
+              <div>
+                <h3 className="text-[15px] font-black text-white uppercase tracking-widest leading-none mb-1">
+                  Executive Operations Report
+                </h3>
+                <p className="text-[12px] text-slate-400 font-semibold">
+                  {filteredEntries.length} records analysed · Vertiv India Manufacturing
+                </p>
+              </div>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              {selectedPlant && <span className="px-2.5 py-1 bg-blue-500/20 text-blue-300 rounded-lg text-[11px] font-black border border-blue-500/20 uppercase">{selectedPlant}</span>}
+              {selectedModel && <span className="px-2.5 py-1 bg-indigo-500/20 text-indigo-300 rounded-lg text-[11px] font-black border border-indigo-500/20 uppercase">{selectedModel}</span>}
+              {selectedSerial && <span className="px-2.5 py-1 bg-violet-500/20 text-violet-300 rounded-lg text-[11px] font-black border border-violet-500/20 uppercase">{selectedSerial}</span>}
+              {(dateFrom || dateTo) && <span className="px-2.5 py-1 bg-slate-500/20 text-slate-300 rounded-lg text-[11px] font-black border border-slate-500/30">{dateFrom || '...'} → {dateTo || '...'}</span>}
+              {!selectedPlant && !selectedModel && !selectedSerial && !dateFrom && !dateTo && (
+                <span className="px-2.5 py-1 bg-white/10 text-slate-300 rounded-lg text-[11px] font-black border border-white/10 uppercase">Full Dataset</span>
+              )}
+              <span className="px-2.5 py-1 bg-white/5 text-slate-400 rounded-lg text-[11px] font-semibold border border-white/10">{today}</span>
+            </div>
+          </div>
+        );
       }
       if (!title) return null;
       const getIcon = (t: string) => {
