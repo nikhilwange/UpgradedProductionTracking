@@ -86,6 +86,10 @@ const App: React.FC = () => {
 
       if (error || !data) {
         if (error && error.code !== "PGRST116") {
+          const msg = error.message?.toLowerCase() || '';
+          if (msg.includes('token') || msg.includes('refresh') || msg.includes('jwt') || msg.includes('not found') || msg.includes('exp')) {
+            throw error;
+          }
           return { role: (cachedRole as any) || 'operator', plant: cachedPlant };
         }
         
@@ -108,6 +112,10 @@ const App: React.FC = () => {
       return { role: finalRole as any, plant: fetchedPlant };
 
     } catch (e: any) {
+      const msg = e.message?.toLowerCase() || '';
+      if (msg.includes('token') || msg.includes('refresh') || msg.includes('jwt') || msg.includes('not found') || msg.includes('exp')) {
+        throw e;
+      }
       console.warn("Role fetch failover engaged:", e.message);
       return { role: (cachedRole as any) || 'operator', plant: cachedPlant };
     }
@@ -136,6 +144,7 @@ const App: React.FC = () => {
             errorMsg.includes('jwt') ||
             errorMsg.includes('exp')
           ) {
+            supabase.auth.signOut().catch(() => {});
             clearLocalCaches();
             setSession(null);
           }
@@ -151,7 +160,9 @@ const App: React.FC = () => {
       } catch (err: any) {
         console.error("Initialization check failed critically:", err.message);
         setInitError(true);
-        if (err.message.includes('token') || err.message.includes('refresh') || err.message.includes('JWT')) {
+        const msg = err.message?.toLowerCase() || '';
+        if (msg.includes('token') || msg.includes('refresh') || msg.includes('jwt') || msg.includes('not found') || msg.includes('exp')) {
+          supabase.auth.signOut().catch(() => {});
           clearLocalCaches();
           setSession(null);
         }
@@ -182,7 +193,8 @@ const App: React.FC = () => {
         }
       } catch (e: any) {
         const msg = e.message?.toLowerCase() || '';
-        if (msg.includes('jwt') || msg.includes('exp') || msg.includes('refresh') || msg.includes('token')) {
+        if (msg.includes('jwt') || msg.includes('exp') || msg.includes('refresh') || msg.includes('token') || msg.includes('not found')) {
+          supabase.auth.signOut().catch(() => {});
           clearLocalCaches();
           setSession(null);
           setUserRole(null);
@@ -273,6 +285,13 @@ const App: React.FC = () => {
         })));
       }
     } catch (e: any) {
+      const msg = e.message?.toLowerCase() || '';
+      if (msg.includes('token') || msg.includes('refresh') || msg.includes('jwt') || msg.includes('not found') || msg.includes('exp')) {
+        supabase.auth.signOut().catch(() => {});
+        clearLocalCaches();
+        setSession(null);
+        return;
+      }
       const isNetworkError = e.message === 'Failed to fetch' || e.name === 'TypeError' || e.message?.includes('NetworkError');
       if (isNetworkError && retryCount < 3) {
         console.log(`Retrying sync (${retryCount + 1}/3)...`);
@@ -358,6 +377,14 @@ const App: React.FC = () => {
       if (newEntries.some(e => e.status === 'Completed')) setActiveTab('dashboard');
       fetchCloudData(); 
     } catch (e: any) {
+      const msg = e.message?.toLowerCase() || '';
+      if (msg.includes('token') || msg.includes('refresh') || msg.includes('jwt') || msg.includes('not found') || msg.includes('exp')) {
+        supabase.auth.signOut().catch(() => {});
+        clearLocalCaches();
+        setSession(null);
+        alert('Session expired. Please sign in again.');
+        return;
+      }
       const isNetworkError = e.message === 'Failed to fetch' || e.name === 'TypeError' || e.message?.includes('NetworkError');
       if (isNetworkError && retryCount < 3) {
         console.log(`Retrying submission (${retryCount + 1}/3)...`);
@@ -410,6 +437,14 @@ const App: React.FC = () => {
       if (error) throw error;
       fetchCloudData();
     } catch (e: any) {
+      const msg = e.message?.toLowerCase() || '';
+      if (msg.includes('token') || msg.includes('refresh') || msg.includes('jwt') || msg.includes('not found') || msg.includes('exp')) {
+        supabase.auth.signOut().catch(() => {});
+        clearLocalCaches();
+        setSession(null);
+        alert('Session expired. Please sign in again.');
+        return;
+      }
       alert(`Update failed: ${e.message}`);
     } finally {
       setIsSyncing(false);
@@ -424,7 +459,17 @@ const App: React.FC = () => {
       const { error } = await supabase.from('production_entries').delete().eq('id', Number(id));
       if (error) throw error;
       fetchCloudData();
-    } catch (e: any) { console.error(e.message); } finally { setIsSyncing(false); }
+    } catch (e: any) {
+      const msg = e.message?.toLowerCase() || '';
+      if (msg.includes('token') || msg.includes('refresh') || msg.includes('jwt') || msg.includes('not found') || msg.includes('exp')) {
+        supabase.auth.signOut().catch(() => {});
+        clearLocalCaches();
+        setSession(null);
+        alert('Session expired. Please sign in again.');
+        return;
+      }
+      console.error(e.message);
+    } finally { setIsSyncing(false); }
   };
 
   const toggleFullscreen = () => {
