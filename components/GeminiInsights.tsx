@@ -67,7 +67,7 @@ const GeminiInsights: React.FC<GeminiInsightsProps> = ({ entries }) => {
       TASK: Generate a professional executive report. Use these EXACT headers: 1. PERFORMANCE SCORECARD, 2. CRITICAL BOTTLENECKS, 3. ROOT CAUSE ANALYSIS, 4. STRATEGIC RECOMMENDATIONS.
       TERMINOLOGY: 'Stage' refers to a production group/section. 'Activity' refers to a specific task within that stage.
       FORMATTING: Clean text only. No markdown bolding (*). No hashtags (#). Use simple dashes (-) for bullets.`;
-      const response = await ai.models.generateContent({ model: 'gemini-3-pro-preview', contents: prompt });
+      const response = await ai.models.generateContent({ model: 'gemini-3.1-pro-preview', contents: prompt });
       setInsight(response.text || "No insights available.");
     } catch (error) {
       setInsight("Error generating Ai insights. Please check configuration.");
