@@ -5,6 +5,8 @@ export const S1_START = 420;  // 07:00
 export const S1_END = 930;    // 15:30
 export const S2_START = 900;  // 15:00
 export const S2_END = 1410;   // 23:30
+export const S3_START = 1410; // 23:30
+export const S3_END = 420;    // 07:00 next day
 
 // --- Chakan Plant Configurations ---
 
@@ -406,6 +408,15 @@ export const BREAK_TIMES = [
   { name: 'Evening', start: '18:30', end: '18:45', duration: 15 },
   { name: 'Dinner', start: '21:00', end: '21:30', duration: 30 },
   { name: 'Non Working Hours', start: '23:31', end: '06:59', duration: 448 }
+];
+
+export const CHILLER_BREAK_TIMES = [
+  { name: 'Lunch',          start: '12:30', end: '13:00', duration: 30 },
+  { name: 'Tea',            start: '14:00', end: '14:15', duration: 15 },
+  { name: 'Evening',        start: '18:30', end: '18:45', duration: 15 },
+  { name: 'Dinner',         start: '21:00', end: '21:30', duration: 30 },
+  { name: 'Midnight Snack', start: '02:30', end: '02:45', duration: 15 },
+  { name: 'Tea Break',      start: '05:00', end: '05:15', duration: 15 },
 ];
 
 export const AMBERNATH_BREAK_TIMES = [

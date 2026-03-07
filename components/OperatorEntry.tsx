@@ -4,7 +4,7 @@ import {
   ChevronDown, RefreshCw, Loader2, ArrowRight, ListChecks, X, AlertCircle, FileText, Scan, CheckCircle2, Activity,
   Filter, ShieldCheck
 } from 'lucide-react';
-import { PLANT_REGISTRY, getModelContext, MODELS_LIST, PRODUCT_LINES_LIST, SERIAL_NUMBERS_LIST, BREAK_TIMES, AMBERNATH_BREAK_TIMES, OPERATORS_BY_MODEL_LINE, LOSS_PARAMETER_MAPPING, HOLIDAYS_LIST, toMins } from '../constants';
+import { PLANT_REGISTRY, getModelContext, MODELS_LIST, PRODUCT_LINES_LIST, SERIAL_NUMBERS_LIST, BREAK_TIMES, AMBERNATH_BREAK_TIMES, CHILLER_BREAK_TIMES, OPERATORS_BY_MODEL_LINE, LOSS_PARAMETER_MAPPING, HOLIDAYS_LIST, toMins, S3_START, S3_END } from '../constants';
 import { ProductionEntry } from '../types';
 import { supabase } from '../supabase';
 import { Html5QrcodeScanner } from 'html5-qrcode';
@@ -276,6 +276,7 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
   const activeBreaks = useMemo(() => {
     const m = model.toUpperCase();
     if (m === 'LI7' || m === 'LI7 PCA' || m === '2X' || m === '3X' || m === 'STS') return AMBERNATH_BREAK_TIMES;
+    if (m === 'CHILLER' || m === 'VANTAGE' || m === 'ADANI') return CHILLER_BREAK_TIMES;
     return BREAK_TIMES;
   }, [model]);
 
@@ -288,15 +289,29 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
           s1Start: toMins(nonWorking.end),
           s1End: toMins(nonWorking.start),
           s2Start: 0,
-          s2End: 0
+          s2End: 0,
+          s3Start: 0,
+          s3End: 0
         };
       }
+    }
+    if (m === 'CHILLER' || m === 'VANTAGE' || m === 'ADANI') {
+      return {
+        s1Start: S1_START,
+        s1End: S1_END,
+        s2Start: S2_START,
+        s2End: S2_END,
+        s3Start: S3_START,
+        s3End: S3_END
+      };
     }
     return {
       s1Start: S1_START,
       s1End: S1_END,
       s2Start: S2_START,
-      s2End: S2_END
+      s2End: S2_END,
+      s3Start: 0,
+      s3End: 0
     };
   }, [model]);
 
@@ -636,9 +651,27 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
 
       if (relStart < relEnd) {
         const hasShift2 = activeShiftBoundaries.s2Start > 0;
+        const hasShift3 = activeShiftBoundaries.s3Start > 0;
         const splitPoint = hasShift2 ? (activeShiftBoundaries.s1End || 930) : 1440;
 
-        const s1Mins = calculateNetInWindow(relStart, relEnd, 0, splitPoint, dateStr);
+        // Shift 3 continuation: midnight (00:00) to s3End (07:00)
+        // This is the overnight portion of Shift 3 from the previous day.
+        // It must be checked BEFORE Shift 1 to avoid incorrectly absorbing
+        // the 00:00-07:00 window into Shift 1.
+        if (hasShift3 && relStart < activeShiftBoundaries.s3End) {
+          const s3ContMins = calculateNetInWindow(relStart, relEnd, 0, activeShiftBoundaries.s3End, dateStr);
+          if (s3ContMins > 0) assignments.push({
+            date: dateStr,
+            shift: 'Shift 3',
+            minutes: s3ContMins,
+            segStart: fromMins(Math.max(relStart, 0)),
+            segEnd: fromMins(Math.min(relEnd, activeShiftBoundaries.s3End))
+          });
+        }
+
+        // Shift 1: s1Start (07:00) to s1End (15:30)
+        const s1ActualStart = hasShift3 ? activeShiftBoundaries.s3End : 0;
+        const s1Mins = calculateNetInWindow(relStart, relEnd, s1ActualStart, splitPoint, dateStr);
         if (s1Mins > 0) assignments.push({ 
           date: dateStr, 
           shift: 'Shift 1', 
@@ -647,8 +680,10 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
           segEnd: fromMins(Math.min(relEnd, splitPoint)) 
         });
 
+        // Shift 2: s2Start (15:00) to s2End (23:30)
         if (hasShift2) {
-          const s2Mins = calculateNetInWindow(relStart, relEnd, splitPoint, 1440, dateStr);
+          const s2End = hasShift3 ? activeShiftBoundaries.s3Start : 1440;
+          const s2Mins = calculateNetInWindow(relStart, relEnd, splitPoint, s2End, dateStr);
           if (s2Mins > 0) assignments.push({ 
             date: dateStr, 
             shift: 'Shift 2', 
@@ -656,6 +691,18 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
             segStart: fromMins(Math.max(relStart, splitPoint)), 
             segEnd: fromMins(Math.min(relEnd, activeShiftBoundaries.s2End || S2_END)) 
           });
+
+          // Shift 3 end-of-day: s3Start (23:30) to midnight
+          if (hasShift3) {
+            const s3Mins = calculateNetInWindow(relStart, relEnd, activeShiftBoundaries.s3Start, 1440, dateStr);
+            if (s3Mins > 0) assignments.push({
+              date: dateStr,
+              shift: 'Shift 3',
+              minutes: s3Mins,
+              segStart: fromMins(Math.max(relStart, activeShiftBoundaries.s3Start)),
+              segEnd: fromMins(1440)
+            });
+          }
         }
       }
       d.setDate(d.getDate() + 1);
