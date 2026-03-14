@@ -2,9 +2,10 @@
   "name": "vertiv-protrack---barcode-scanner",
   "private": true,
   "version": "0.0.0",
-  "main": "index.js",
+  "type": "module",
   "scripts": {
-    "dev": "vite",
+    "start": "node server.ts",
+    "dev": "tsx server.ts",
     "build": "vite build",
     "lint": "tsc --noEmit",
     "preview": "vite preview"
