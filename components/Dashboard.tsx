@@ -735,7 +735,15 @@ const Dashboard: React.FC<DashboardProps> = ({ entries, plant, userRole }) => {
                     {/* Activity Header Row - Compact spacing applied */}
                     <div className="flex flex-col lg:flex-row justify-between gap-4">
                       <div className="flex-1 space-y-1">
-                        <span className="text-[10px] font-black text-blue-400 uppercase tracking-widest block ml-1">DATE: {formatDate(group.date)}</span>
+                        <span className="text-[10px] font-black text-blue-400 uppercase tracking-widest block ml-1">
+                          {(() => {
+                            const lastShift = group.shifts[group.shifts.length - 1];
+                            const endDate = lastShift.endDate || lastShift.date;
+                            return endDate !== group.date
+                              ? `${formatDate(group.date)} → ${formatDate(endDate)}`
+                              : formatDate(group.date);
+                          })()}
+                        </span>
                         <div className="flex items-center gap-3">
                           <h4 className="text-xl font-black text-slate-900 tracking-tight leading-none">{toTitleCase(group.activityName)}</h4>
                           <span className="text-sm font-bold text-slate-400">Activity cycle: {Math.round(getStandardValue(group.activityName, group.shifts[0]?.standardCycleTime || 0))} min</span>
@@ -768,11 +776,18 @@ const Dashboard: React.FC<DashboardProps> = ({ entries, plant, userRole }) => {
                               {/* Shift Header Area (Green Box Alignment) */}
                               <div className="flex flex-col lg:flex-row gap-6 items-center">
                                 {/* Left Partition: Shift Label */}
-                                <div className="flex-1">
+                                <div className="flex-1 flex items-center gap-2">
                                   <span className={`px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-widest border ${
                                     entry.shift === 'Shift 2' ? 'bg-amber-50 text-amber-600 border-amber-100' : 'bg-blue-50 text-blue-600 border-blue-100'
                                   }`}>
                                     {entry.shift}
+                                  </span>
+                                  <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">
+                                    {formatDate(entry.productionDate)}
+                                    {entry.endDate && entry.endDate !== entry.productionDate ? ` → ${formatDate(entry.endDate)}` : ''}
+                                  </span>
+                                  <span className="text-[9px] font-semibold text-slate-300">
+                                    {entry.startTime} – {entry.endTime}
                                   </span>
                                 </div>
 
