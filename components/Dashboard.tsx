@@ -764,6 +764,7 @@ const Dashboard: React.FC<DashboardProps> = ({ entries, plant, userRole }) => {
                       {group.shifts
                         .filter(e => {
                           if (isCompleted && e.status === 'In Progress') return false;
+                          if (e.status === 'Completed') return true;
                           return e.manpower > 0 || e.status === 'In Progress';
                         })
                         .map((entry: ProductionEntry, shiftIdx: number) => {

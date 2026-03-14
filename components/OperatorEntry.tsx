@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { 
   Send, Users, CalendarDays, Tag, Hash, Box, Layout, Layers, Info, Clock3, 
   ChevronDown, RefreshCw, Loader2, ArrowRight, ListChecks, X, AlertCircle, FileText, Scan, CheckCircle2, Activity,
-  Filter, ShieldCheck
+  Filter, ShieldCheck, Copy
 } from 'lucide-react';
 import { PLANT_REGISTRY, getModelContext, MODELS_LIST, PRODUCT_LINES_LIST, SERIAL_NUMBERS_LIST, BREAK_TIMES, AMBERNATH_BREAK_TIMES, CHILLER_BREAK_TIMES, OPERATORS_BY_MODEL_LINE, LOSS_PARAMETER_MAPPING, HOLIDAYS_LIST, toMins, S3_START, S3_END } from '../constants';
 import { ProductionEntry } from '../types';
@@ -660,13 +660,18 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
         // the 00:00-07:00 window into Shift 1.
         if (hasShift3 && relStart < activeShiftBoundaries.s3End) {
           const s3ContMins = calculateNetInWindow(relStart, relEnd, 0, activeShiftBoundaries.s3End, dateStr);
-          if (s3ContMins > 0) assignments.push({
-            date: dateStr,
-            shift: 'Shift 3',
-            minutes: s3ContMins,
-            segStart: fromMins(Math.max(relStart, 0)),
-            segEnd: fromMins(Math.min(relEnd, activeShiftBoundaries.s3End))
-          });
+          if (s3ContMins > 0) {
+            const prevD = new Date(d);
+            prevD.setDate(prevD.getDate() - 1);
+            const prevDateStr = formatDateISO(prevD);
+            assignments.push({
+              date: prevDateStr,
+              shift: 'Shift 3',
+              minutes: s3ContMins,
+              segStart: fromMins(Math.max(relStart, 0)),
+              segEnd: fromMins(Math.min(relEnd, activeShiftBoundaries.s3End))
+            });
+          }
         }
 
         // Shift 1: s1Start (07:00) to s1End (15:30)
@@ -707,7 +712,27 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
       }
       d.setDate(d.getDate() + 1);
     }
-    return assignments;
+    
+    // Aggregate splits by date and shift
+    const aggregated: Record<string, typeof assignments[0]> = {};
+    assignments.forEach(a => {
+      const key = `${a.date}-${a.shift}`;
+      if (aggregated[key]) {
+        aggregated[key].minutes += a.minutes;
+        if (a.segStart >= '12:00') {
+          aggregated[key].segStart = a.segStart;
+        } else {
+          aggregated[key].segEnd = a.segEnd;
+        }
+      } else {
+        aggregated[key] = { ...a };
+      }
+    });
+
+    return Object.values(aggregated).sort((a, b) => {
+      if (a.date !== b.date) return a.date.localeCompare(b.date);
+      return a.shift.localeCompare(b.shift);
+    });
   }, [productionDate, endDate, startTime, endTime, activeBreaks, activeShiftBoundaries]);
 
   useEffect(() => {
@@ -792,14 +817,59 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
     setIsScanning(null);
   };
 
+  // Copies reason fields only (not manpower) from one shift row to ALL other shift rows
+  const applyReasonToAllShifts = (sourceKey: string) => {
+    const source = assignmentInputs[sourceKey] as AssignmentInput;
+    if (!source) return;
+    const updates: Record<string, AssignmentInput> = {};
+    multiDaySplits.forEach(split => {
+      const k = `${split.date}-${split.shift}`;
+      if (k !== sourceKey) {
+        const existing = (assignmentInputs[k] as AssignmentInput) || { operators: [], count: 0 };
+        updates[k] = {
+          ...existing,
+          affectedParameter: source.affectedParameter,
+          defectCategory: source.defectCategory,
+          issueDescription: source.issueDescription
+        };
+      }
+    });
+    setAssignmentInputs(prev => ({ ...prev, ...updates }));
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const isBlockingStart = !activeInProgressEntry && isAlreadyLogged;
     if (!serialNo || isFetchingLastLog || isBlockingStart) return;
 
     if (activeInProgressEntry) {
+      // Check 1: All shifts have zero headcount
       const allZeroHeadcount = (Object.values(assignmentInputs) as AssignmentInput[]).every(inp => inp.count === 0);
       if (allZeroHeadcount) { alert("Resource Allocation required: Please select operators for the shifts worked."); return; }
+
+      // Check 2: Each individual shift must have headcount > 0
+      const missingManpower = multiDaySplits.find(split => {
+        const key = `${split.date}-${split.shift}`;
+        const inp = assignmentInputs[key] as AssignmentInput;
+        return !inp || inp.count === 0;
+      });
+      if (missingManpower) {
+        alert(`Manpower required: Please enter headcount for ${missingManpower.shift} on ${missingManpower.date}.`);
+        return;
+      }
+
+      // Check 3: Each shift must have loss reason filled (if any loss exists)
+      if (lossHours > 0) {
+        const missingReason = multiDaySplits.find(split => {
+          const key = `${split.date}-${split.shift}`;
+          const inp = assignmentInputs[key] as AssignmentInput;
+          return !inp || !inp.affectedParameter || !inp.defectCategory;
+        });
+        if (missingReason) {
+          alert(`Loss Attribution required: Please fill the Affected Parameter and Defect Category for ${missingReason.shift} on ${missingReason.date}.`);
+          return;
+        }
+      }
     }
 
     setIsSubmitting(true);
@@ -1108,6 +1178,21 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
                               <p className="text-sm font-black text-slate-900">{split.minutes} Mins</p>
                             </div>
                           </div>
+                          {(() => {
+                            const isFirstShift = multiDaySplits.indexOf(split) === 0;
+                            const hasMultipleShifts = multiDaySplits.length > 1;
+                            if (!isFirstShift || !hasMultipleShifts || allocatedLoss === 0) return null;
+                            return (
+                              <button
+                                type="button"
+                                onClick={() => applyReasonToAllShifts(key)}
+                                className="flex items-center gap-1.5 px-3 py-2 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-100 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all"
+                              >
+                                <Copy size={11} />
+                                Apply reason to all shifts
+                              </button>
+                            );
+                          })()}
                         </div>
                       </div>
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -1115,7 +1200,24 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
                           <label className="text-xs font-bold text-slate-500 uppercase flex items-center gap-2 ml-1">
                             <Users size={14} className="text-blue-500" /> Personnel Deployment
                           </label>
-                          <OperatorMultiSelect options={availableOperators} selected={input.operators} onChange={(selected) => setAssignmentInputs(prev => ({ ...prev, [key]: { ...prev[key], operators: selected, count: selected.length } }))} />
+                          <OperatorMultiSelect options={availableOperators} selected={input.operators} onChange={(selected) => {
+                            setAssignmentInputs(prev => {
+                              const updated = { ...prev, [key]: { ...prev[key], operators: selected, count: selected.length } };
+                              // Only propagate if this is the FIRST occurrence of this shift type
+                              const isFirstOfShiftType = multiDaySplits.findIndex(s => s.shift === split.shift) === multiDaySplits.indexOf(split);
+                              if (isFirstOfShiftType) {
+                                // Always overwrite same-shift-type rows so all selections (including incremental) propagate fully
+                                multiDaySplits.forEach(s => {
+                                  const k2 = `${s.date}-${s.shift}`;
+                                  if (s.shift === split.shift && k2 !== key) {
+                                    const existing = (prev[k2] as AssignmentInput) || { operators: [], count: 0, affectedParameter: '', defectCategory: '', issueDescription: '' };
+                                    updated[k2] = { ...existing, operators: selected, count: selected.length };
+                                  }
+                                });
+                              }
+                              return updated;
+                            });
+                          }} />
                         </div>
                         <div className="space-y-1 flex flex-col justify-end">
                           <div className="flex justify-between items-center px-1">
@@ -1125,7 +1227,23 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
                             <span className={`text-xs font-black ${input.count === 0 ? 'text-rose-600 animate-pulse' : 'text-blue-600'}`}>{input.count} Manpower</span>
                           </div>
                           <div className="flex items-center gap-4 py-2">
-                            <input type="range" min="0" max="15" value={input.count} onChange={(e) => setAssignmentInputs(prev => ({ ...prev, [key]: { ...prev[key], count: Number(e.target.value) } }))} className="flex-1 accent-blue-600 h-1.5 bg-slate-100 rounded-lg appearance-none cursor-pointer" />
+                            <input type="range" min="0" max="15" value={input.count} onChange={(e) => {
+                              const val = Number(e.target.value);
+                              setAssignmentInputs(prev => {
+                                const updated = { ...prev, [key]: { ...prev[key], count: val } };
+                                // Sticky: pre-fill headcount into same-shift-type rows across other days if still empty
+                                multiDaySplits.forEach(s => {
+                                  const k2 = `${s.date}-${s.shift}`;
+                                  if (s.shift === split.shift && k2 !== key) {
+                                    const existing = (prev[k2] as AssignmentInput) || { operators: [], count: 0, affectedParameter: '', defectCategory: '', issueDescription: '' };
+                                    if (!existing.count || existing.count === 0) {
+                                      updated[k2] = { ...existing, count: val };
+                                    }
+                                  }
+                                });
+                                return updated;
+                              });
+                            }} className="flex-1 accent-blue-600 h-1.5 bg-slate-100 rounded-lg appearance-none cursor-pointer" />
                           </div>
                         </div>
                       </div>
@@ -1136,7 +1254,23 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
                               <label className="text-xs font-bold text-slate-500 uppercase flex items-center gap-2 ml-1">
                                 <Filter size={14} className="text-rose-500" /> Affected Parameter
                               </label>
-                              <select value={input.affectedParameter} onChange={(e) => setAssignmentInputs(prev => ({ ...prev, [key]: { ...prev[key], affectedParameter: e.target.value } }))} className="w-full px-4 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold text-[#002060]">
+                              <select value={input.affectedParameter} onChange={(e) => {
+                                const val = e.target.value;
+                                setAssignmentInputs(prev => {
+                                  const updated = { ...prev, [key]: { ...prev[key], affectedParameter: val, defectCategory: '' } };
+                                  // Sticky: pre-fill into ALL subsequent shift rows if still empty
+                                  multiDaySplits.forEach(s => {
+                                    const k2 = `${s.date}-${s.shift}`;
+                                    if (k2 !== key) {
+                                      const existing = (prev[k2] as AssignmentInput) || { operators: [], count: 0, affectedParameter: '', defectCategory: '', issueDescription: '' };
+                                      if (!existing.affectedParameter) {
+                                        updated[k2] = { ...existing, affectedParameter: val, defectCategory: '' };
+                                      }
+                                    }
+                                  });
+                                  return updated;
+                                });
+                              }} className="w-full px-4 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold text-[#002060]">
                                 <option value="">Select Parameter</option>
                                 {Object.keys(LOSS_PARAMETER_MAPPING).map(p => <option key={p} value={p}>{p}</option>)}
                               </select>
@@ -1145,7 +1279,23 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
                               <label className="text-xs font-bold text-slate-500 uppercase flex items-center gap-2 ml-1">
                                 <AlertCircle size={14} className="text-rose-500" /> Defect Category
                               </label>
-                              <select value={input.defectCategory} onChange={(e) => setAssignmentInputs(prev => ({ ...prev, [key]: { ...prev[key], defectCategory: e.target.value } }))} disabled={!input.affectedParameter} className="w-full px-4 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold text-[#002060]">
+                              <select value={input.defectCategory} onChange={(e) => {
+                                const val = e.target.value;
+                                setAssignmentInputs(prev => {
+                                  const updated = { ...prev, [key]: { ...prev[key], defectCategory: val } };
+                                  // Sticky: pre-fill into ALL subsequent shift rows if still empty
+                                  multiDaySplits.forEach(s => {
+                                    const k2 = `${s.date}-${s.shift}`;
+                                    if (k2 !== key) {
+                                      const existing = (prev[k2] as AssignmentInput) || { operators: [], count: 0, affectedParameter: '', defectCategory: '', issueDescription: '' };
+                                      if (!existing.defectCategory) {
+                                        updated[k2] = { ...existing, defectCategory: val };
+                                      }
+                                    }
+                                  });
+                                  return updated;
+                                });
+                              }} disabled={!input.affectedParameter} className="w-full px-4 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold text-[#002060]">
                                 <option value="">Select Category</option>
                                 {(LOSS_PARAMETER_MAPPING[input.affectedParameter] || []).map(d => <option key={d} value={d}>{d}</option>)}
                               </select>
@@ -1155,7 +1305,24 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
                             <label className="text-xs font-bold text-slate-500 uppercase flex items-center gap-2 ml-1">
                               <FileText size={14} className="text-rose-500" /> Issue Description
                             </label>
-                            <textarea value={input.issueDescription} onChange={(e) => setAssignmentInputs(prev => ({ ...prev, [key]: { ...prev[key], issueDescription: e.target.value } }))} placeholder="Describe the bottleneck..." className="w-full px-5 py-2 bg-white border border-slate-200 rounded-2xl text-xs font-bold min-h-[60px] text-[#002060]" rows={2} />
+                            <textarea value={input.issueDescription} onChange={(e) => {
+                              const val = e.target.value;
+                              setAssignmentInputs(prev => {
+                                const updated = { ...prev, [key]: { ...prev[key], issueDescription: val } };
+                                // Always overwrite ALL other shift rows if this is the first shift card
+                                const isFirstShift = multiDaySplits.indexOf(split) === 0;
+                                if (isFirstShift) {
+                                  multiDaySplits.forEach(s => {
+                                    const k2 = `${s.date}-${s.shift}`;
+                                    if (k2 !== key) {
+                                      const existing = (prev[k2] as AssignmentInput) || { operators: [], count: 0, affectedParameter: '', defectCategory: '', issueDescription: '' };
+                                      updated[k2] = { ...existing, issueDescription: val };
+                                    }
+                                  });
+                                }
+                                return updated;
+                              });
+                            }} placeholder="Describe the bottleneck..." className="w-full px-5 py-2 bg-white border border-slate-200 rounded-2xl text-xs font-bold min-h-[60px] text-[#002060]" rows={2} />
                           </div>
                         </div>
                       )}
