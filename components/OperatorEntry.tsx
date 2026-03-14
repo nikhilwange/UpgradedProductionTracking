@@ -879,8 +879,8 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
     try {
       if (!activeInProgressEntry) {
         if (idleGapMinutes > 0 && lastLog) {
-          if (!idleAttribution.affectedParameter || !idleAttribution.defectCategory || !idleAttribution.issueDescription) {
-            alert("Gap Detected: Inter-Activity Loss attribution required.");
+          if (idleGapMinutes >= 10 && (!idleAttribution.affectedParameter || !idleAttribution.defectCategory || !idleAttribution.issueDescription)) {
+            alert("Gap Detected: Inter-Activity Loss attribution required for gaps of 10 minutes or more.");
             setIsSubmitting(false);
             return;
           }
@@ -898,11 +898,11 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
             standardCycleTime: 0, actualCycleTime: idleGapMinutes,
             shift1ActualMinutes: 0, shift2ActualMinutes: 0,
             variance: idleGapMinutes, manhoursEngaged: idleHrs,
-            lossHours: idleHrs, lossReason: idleAttribution.defectCategory,
-            affectedParameter: idleAttribution.affectedParameter,
-            defectCategory: idleAttribution.defectCategory,
-            issueDescription: idleAttribution.issueDescription,
-            notes: `Gap Audit: ${idleAttribution.issueDescription}`,
+            lossHours: idleHrs, lossReason: idleAttribution.defectCategory || 'Minor Transition',
+            affectedParameter: idleAttribution.affectedParameter || 'Standard Operation',
+            defectCategory: idleAttribution.defectCategory || 'Minor Transition',
+            issueDescription: idleAttribution.issueDescription || `Auto-logged: ${idleGapMinutes} min transition gap (under 10 min threshold)`,
+            notes: idleAttribution.issueDescription ? `Gap Audit: ${idleAttribution.issueDescription}` : `Auto-logged: ${idleGapMinutes} min minor transition gap`,
             status: 'Completed', createdAt: new Date().toISOString(), is_gap: true
           });
         }
@@ -963,10 +963,16 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
       setTimeout(() => setShowSuccessOverlay(false), 4000);
 
       if (!activeInProgressEntry || entriesToSave.some(e => e.status === 'Completed')) {
-        setSerialNo(''); setUnitSrNo(''); setSoSqNo(''); setAssignmentInputs({}); 
+        const todayStr = formatDateISO(new Date());
+        const nowStr = new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+        setSerialNo(''); setUnitSrNo(''); setSoSqNo(''); setAssignmentInputs({});
         setIdleAttribution({ affectedParameter: '', defectCategory: '', issueDescription: '' });
         setUserHasSelectedActivity(false);
         setActiveInProgressEntry(null);
+        setProductionDate(todayStr);
+        setEndDate(todayStr);
+        setStartTime(nowStr);
+        setEndTime(nowStr);
       }
     } finally { setIsSubmitting(false); }
   };
@@ -1351,32 +1357,43 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
                 <h4 className="text-xl font-black text-indigo-900 tracking-tight leading-none">Inter-Activity Idle Time Audit</h4>
                 <div className="flex items-center gap-2 px-3 py-1 bg-[#4F46E5] text-white rounded-full text-[10px] font-black uppercase">LOSS: {(idleGapMinutes/60).toFixed(2)} HRS</div>
               </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div className="space-y-1.5">
-                  <label className="text-[11px] font-black text-indigo-900 uppercase tracking-widest ml-1 flex items-center gap-2">
-                    <Filter size={14} /> Affected Parameter
-                  </label>
-                  <select value={idleAttribution.affectedParameter} onChange={(e) => setIdleAttribution(prev => ({ ...prev, affectedParameter: e.target.value }))} className="w-full px-4 py-3 bg-white border border-indigo-200 rounded-xl text-sm font-bold text-[#002060]" required>
-                    <option value="">Select Affected Parameter</option>
-                    {Object.keys(LOSS_PARAMETER_MAPPING).map(p => <option key={p} value={p}>{p}</option>)}
-                  </select>
+              {idleGapMinutes < 10 ? (
+                <div className="flex items-center gap-3 px-4 py-3 bg-indigo-50 border border-indigo-100 rounded-2xl">
+                  <Info size={16} className="text-indigo-400 shrink-0" />
+                  <p className="text-xs font-bold text-indigo-500">
+                    Minor gap under 10 minutes — reason not required. Will be auto-logged as transition time.
+                  </p>
                 </div>
-                <div className="space-y-1.5">
-                  <label className="text-[11px] font-black text-indigo-900 uppercase tracking-widest ml-1 flex items-center gap-2">
-                    <AlertCircle size={14} /> Defect Category
-                  </label>
-                  <select value={idleAttribution.defectCategory} onChange={(e) => setIdleAttribution(prev => ({ ...prev, defectCategory: e.target.value }))} disabled={!idleAttribution.affectedParameter} className="w-full px-4 py-3 bg-white border border-indigo-200 rounded-xl text-sm font-bold text-[#002060]" required>
-                    <option value="">Select Defect Category...</option>
-                    {(LOSS_PARAMETER_MAPPING[idleAttribution.affectedParameter] || []).map(d => <option key={d} value={d}>{d}</option>)}
-                  </select>
-                </div>
-              </div>
-              <div className="space-y-1.5">
-                <label className="text-[11px] font-black text-indigo-900 uppercase tracking-widest ml-1 flex items-center gap-2">
-                  <FileText size={14} /> Issue Description
-                </label>
-                <textarea value={idleAttribution.issueDescription} onChange={(e) => setIdleAttribution(prev => ({ ...prev, issueDescription: e.target.value }))} placeholder="Explain the idle phase bottleneck..." className="w-full px-5 py-4 bg-white border border-indigo-100 rounded-[1.5rem] text-sm font-bold min-h-[100px] text-[#002060]" required />
-              </div>
+              ) : (
+                <>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div className="space-y-1.5">
+                      <label className="text-[11px] font-black text-indigo-900 uppercase tracking-widest ml-1 flex items-center gap-2">
+                        <Filter size={14} /> Affected Parameter
+                      </label>
+                      <select value={idleAttribution.affectedParameter} onChange={(e) => setIdleAttribution(prev => ({ ...prev, affectedParameter: e.target.value }))} className="w-full px-4 py-3 bg-white border border-indigo-200 rounded-xl text-sm font-bold text-[#002060]" required>
+                        <option value="">Select Affected Parameter</option>
+                        {Object.keys(LOSS_PARAMETER_MAPPING).map(p => <option key={p} value={p}>{p}</option>)}
+                      </select>
+                    </div>
+                    <div className="space-y-1.5">
+                      <label className="text-[11px] font-black text-indigo-900 uppercase tracking-widest ml-1 flex items-center gap-2">
+                        <AlertCircle size={14} /> Defect Category
+                      </label>
+                      <select value={idleAttribution.defectCategory} onChange={(e) => setIdleAttribution(prev => ({ ...prev, defectCategory: e.target.value }))} disabled={!idleAttribution.affectedParameter} className="w-full px-4 py-3 bg-white border border-indigo-200 rounded-xl text-sm font-bold text-[#002060]" required>
+                        <option value="">Select Defect Category...</option>
+                        {(LOSS_PARAMETER_MAPPING[idleAttribution.affectedParameter] || []).map(d => <option key={d} value={d}>{d}</option>)}
+                      </select>
+                    </div>
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-[11px] font-black text-indigo-900 uppercase tracking-widest ml-1 flex items-center gap-2">
+                      <FileText size={14} /> Issue Description
+                    </label>
+                    <textarea value={idleAttribution.issueDescription} onChange={(e) => setIdleAttribution(prev => ({ ...prev, issueDescription: e.target.value }))} placeholder="Explain the idle phase bottleneck..." className="w-full px-5 py-4 bg-white border border-indigo-100 rounded-[1.5rem] text-sm font-bold min-h-[100px] text-[#002060]" required />
+                  </div>
+                </>
+              )}
             </div>
           )}
 
