@@ -135,7 +135,6 @@ const App: React.FC = () => {
         
         if (result.error) {
           const errorMsg = result.error.message?.toLowerCase() || '';
-          console.error("Session Error detected:", errorMsg);
           // Catch and handle JWT/Refresh errors specifically
           if (
             errorMsg.includes('refresh') || 
@@ -144,9 +143,12 @@ const App: React.FC = () => {
             errorMsg.includes('jwt') ||
             errorMsg.includes('exp')
           ) {
+            console.warn("Session expired or invalid token detected. Clearing session.");
             supabase.auth.signOut().catch(() => {});
             clearLocalCaches();
             setSession(null);
+          } else {
+            console.error("Session Error detected:", errorMsg);
           }
         } else {
           const currentSession = result.data.session;
@@ -158,13 +160,15 @@ const App: React.FC = () => {
           }
         }
       } catch (err: any) {
-        console.error("Initialization check failed critically:", err.message);
-        setInitError(true);
         const msg = err.message?.toLowerCase() || '';
         if (msg.includes('token') || msg.includes('refresh') || msg.includes('jwt') || msg.includes('not found') || msg.includes('exp')) {
+          console.warn("Initialization check failed due to invalid token. Clearing session.");
           supabase.auth.signOut().catch(() => {});
           clearLocalCaches();
           setSession(null);
+        } else {
+          console.error("Initialization check failed critically:", err.message);
+          setInitError(true);
         }
       } finally {
         setIsInitializing(false);
@@ -297,7 +301,7 @@ const App: React.FC = () => {
         console.log(`Retrying sync (${retryCount + 1}/3)...`);
         setTimeout(() => fetchCloudData(retryCount + 1), 1500 * (retryCount + 1));
       } else {
-        console.error("Sync Error:", e.message);
+        console.warn("Sync Error:", e.message);
       }
     } finally {
       setIsSyncing(false);
@@ -468,7 +472,7 @@ const App: React.FC = () => {
         alert('Session expired. Please sign in again.');
         return;
       }
-      console.error(e.message);
+      console.warn("Delete Error:", e.message);
     } finally { setIsSyncing(false); }
   };
 
@@ -512,7 +516,7 @@ const App: React.FC = () => {
 
   return (
     <div className="min-h-screen flex flex-col lg:flex-row bg-slate-50">
-      <nav className="w-full lg:w-64 bg-slate-900 text-white lg:min-h-screen flex-shrink-0 flex flex-col">
+      <nav className="w-full lg:w-64 bg-slate-900 text-white flex-shrink-0 flex flex-col lg:fixed lg:top-0 lg:left-0 lg:h-screen lg:overflow-y-auto z-20">
         <div className="p-6 flex items-center gap-3">
           <Factory size={24} className="text-blue-500" />
           <div>
@@ -548,7 +552,7 @@ const App: React.FC = () => {
           </div>
         </div>
       </nav>
-      <main className="flex-1 overflow-y-auto relative">
+      <main className="flex-1 overflow-y-auto relative lg:ml-64">
         <header className="bg-white border-b border-slate-200 px-8 py-6 flex flex-col md:flex-row md:items-center justify-between sticky top-0 z-10 gap-4">
           <div className="flex items-center gap-4">
             <div className="flex items-center gap-3">

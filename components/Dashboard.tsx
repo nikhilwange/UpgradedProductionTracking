@@ -16,6 +16,7 @@ const Dashboard: React.FC<DashboardProps> = ({ entries, plant, userRole }) => {
   const [selectedSerial, setSelectedSerial] = useState<string | null>(null);
   const [selectedPlantFilter, setSelectedPlantFilter] = useState<string>('All');
   const [selectedModelFilter, setSelectedModelFilter] = useState<string>('All');
+  const [pipelineView, setPipelineView] = useState<'active' | 'completed'>('active');
   const hasSetDefaultModel = useRef(false);
 
   const isGlobal = userRole === 'admin' || userRole === 'management';
@@ -134,10 +135,26 @@ const Dashboard: React.FC<DashboardProps> = ({ entries, plant, userRole }) => {
   }, [normalizedEntries]);
 
   // Filtered unit dropdown list
+  const FINISHING_ACTIVITIES = [
+    'Finishing',
+    'Finishing Activity',
+    'Testing'
+  ];
+
+  const isUnitCompleted = (u: typeof unitsList[0]): boolean => {
+    const today = new Date();
+    const currentYearMonth = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`;
+    const finishingEntry = u.allEntries
+      .filter(e => FINISHING_ACTIVITIES.includes(e.activity) && e.status === 'Completed')
+      .sort((a, b) => new Date(b.productionDate).getTime() - new Date(a.productionDate).getTime())[0];
+    if (!finishingEntry) return false;
+    const entryMonth = finishingEntry.productionDate.substring(0, 7);
+    return entryMonth < currentYearMonth;
+  };
+
   const filteredUnitsList = useMemo(() => {
     return unitsList.filter(u => {
       const plantMatch = selectedPlantFilter === 'All' || u.plant === selectedPlantFilter;
-      
       let modelMatch = false;
       if (selectedModelFilter === 'All') {
         modelMatch = true;
@@ -146,10 +163,10 @@ const Dashboard: React.FC<DashboardProps> = ({ entries, plant, userRole }) => {
       } else {
         modelMatch = u.model.toUpperCase() === selectedModelFilter.toUpperCase();
       }
-      
-      return plantMatch && modelMatch;
+      if (!plantMatch || !modelMatch) return false;
+      return pipelineView === 'completed' ? isUnitCompleted(u) : !isUnitCompleted(u);
     });
-  }, [unitsList, selectedPlantFilter, selectedModelFilter]);
+  }, [unitsList, selectedPlantFilter, selectedModelFilter, pipelineView]);
 
   const availablePlants = useMemo(() => {
     const plants = new Set(normalizedEntries.map(e => e.plant));
@@ -433,6 +450,10 @@ const Dashboard: React.FC<DashboardProps> = ({ entries, plant, userRole }) => {
   const activePipelines = useMemo(() => {
     const results: Record<string, { activity: string; model: string; plant: string; isInProgress: boolean }> = {};
     
+    const today = new Date();
+    const currentYearMonth = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`;
+    const FINISHING_ACTS = ['Finishing', 'Finishing Activity', 'Testing'];
+
     // Group entries by unit
     const unitEntriesMap: Record<string, ProductionEntry[]> = {};
     (entries || []).forEach(e => {
@@ -445,6 +466,12 @@ const Dashboard: React.FC<DashboardProps> = ({ entries, plant, userRole }) => {
       const activeAct = getActiveActivityName(unitEntries);
       const sorted = [...unitEntries].sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
       const last = sorted[sorted.length - 1];
+
+      // Exclude units whose finishing activity completed in a previous month
+      const finishingEntry = unitEntries
+        .filter(e => FINISHING_ACTS.includes(e.activity) && e.status === 'Completed')
+        .sort((a, b) => new Date(b.productionDate).getTime() - new Date(a.productionDate).getTime())[0];
+      if (finishingEntry && finishingEntry.productionDate.substring(0, 7) < currentYearMonth) return;
 
       if (activeAct) {
         results[sn] = {
@@ -608,8 +635,32 @@ const Dashboard: React.FC<DashboardProps> = ({ entries, plant, userRole }) => {
         <div className="bg-slate-50/30 px-8 py-6 border-b border-slate-100">
           <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
             <div className="space-y-4">
+              <div className="flex items-center gap-2 mb-1">
+                <button
+                  type="button"
+                  onClick={() => setPipelineView('active')}
+                  className={`px-4 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest border transition-all ${
+                    pipelineView === 'active'
+                      ? 'bg-blue-600 text-white border-blue-600'
+                      : 'bg-white text-slate-400 border-slate-200 hover:border-blue-300'
+                  }`}
+                >
+                  Active Pipeline
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPipelineView('completed')}
+                  className={`px-4 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest border transition-all ${
+                    pipelineView === 'completed'
+                      ? 'bg-emerald-600 text-white border-emerald-600'
+                      : 'bg-white text-slate-400 border-slate-200 hover:border-emerald-300'
+                  }`}
+                >
+                  ✓ Completed Units
+                </button>
+              </div>
               <p className="text-[10px] font-black text-blue-600 uppercase tracking-widest">
-                Unit Selection • {filteredUnitsList.length} Records Found
+                {pipelineView === 'completed' ? 'Completed Units' : 'Active Pipeline'} • {filteredUnitsList.length} Records Found
               </p>
               <div className="relative w-full md:w-96">
                 <select 
@@ -617,7 +668,39 @@ const Dashboard: React.FC<DashboardProps> = ({ entries, plant, userRole }) => {
                   onChange={(e) => setSelectedSerial(e.target.value)}
                   className="w-full pl-6 pr-10 py-3 bg-white border border-slate-200 rounded-2xl outline-none text-sm font-black text-slate-900 appearance-none focus:border-blue-500 transition-all shadow-sm"
                 >
-                  {filteredUnitsList.map(u => (
+                  {pipelineView === 'completed' ? (() => {
+                    const FINISHING_ACTS = ['Finishing', 'Finishing Activity', 'Testing'];
+                    // Group units by finishing month
+                    const grouped: Record<string, typeof filteredUnitsList> = {};
+                    filteredUnitsList.forEach(u => {
+                      const finishingEntry = u.allEntries
+                        .filter(e => FINISHING_ACTS.includes(e.activity) && e.status === 'Completed')
+                        .sort((a, b) => new Date(b.productionDate).getTime() - new Date(a.productionDate).getTime())[0];
+                      const monthKey = finishingEntry
+                        ? finishingEntry.productionDate.substring(0, 7)
+                        : 'Unknown';
+                      if (!grouped[monthKey]) grouped[monthKey] = [];
+                      grouped[monthKey].push(u);
+                    });
+                    // Sort months descending (most recent first)
+                    return Object.entries(grouped)
+                      .sort(([a], [b]) => b.localeCompare(a))
+                      .map(([monthKey, units]) => {
+                        const [y, m] = monthKey.split('-');
+                        const label = monthKey === 'Unknown' ? 'Unknown' :
+                          new Date(Number(y), Number(m) - 1, 1)
+                            .toLocaleDateString('en-IN', { month: 'long', year: 'numeric' });
+                        return (
+                          <optgroup key={monthKey} label={`${label} — ${units.length} unit${units.length > 1 ? 's' : ''}`}>
+                            {units.map(u => (
+                              <option key={u.serialNo} value={u.serialNo}>
+                                {u.plant} — {u.model} — {u.serialNo}
+                              </option>
+                            ))}
+                          </optgroup>
+                        );
+                      });
+                  })() : filteredUnitsList.map(u => (
                     <option key={u.serialNo} value={u.serialNo}>
                       {u.plant} — {u.model} — {u.serialNo} {u.activeActivity ? `(In Progress: ${u.activeActivity})` : ''}
                     </option>
