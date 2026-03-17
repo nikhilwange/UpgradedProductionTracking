@@ -464,7 +464,12 @@ const Dashboard: React.FC<DashboardProps> = ({ entries, plant, userRole }) => {
 
     Object.entries(unitEntriesMap).forEach(([sn, unitEntries]) => {
       const activeAct = getActiveActivityName(unitEntries);
-      const sorted = [...unitEntries].sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+      const sorted = [...unitEntries].sort((a, b) => {
+        const dateA = new Date(`${a.productionDate}T${a.startTime || '00:00'}`).getTime();
+        const dateB = new Date(`${b.productionDate}T${b.startTime || '00:00'}`).getTime();
+        if (dateA !== dateB) return dateA - dateB;
+        return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+      });
       const last = sorted[sorted.length - 1];
 
       // Exclude units whose finishing activity completed in a previous month
