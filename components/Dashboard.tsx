@@ -5,6 +5,7 @@ import {
 import { TrendingUp, Clock, AlertTriangle, Package, ChevronDown, Activity as ActivityIcon, FileText, Timer, Filter, Globe, Loader2 } from 'lucide-react';
 import { ProductionEntry } from '../types';
 import { ACTIVITIES_LIST, ACTIVITY_STANDARDS, PLANT_REGISTRY, calculateAvailableMinutes, AMBERNATH_BREAK_TIMES, MODELS_LIST, getModelContext } from '../constants';
+import { supabase } from '../supabase';
 
 interface DashboardProps {
   entries: ProductionEntry[];
@@ -24,7 +25,7 @@ const Dashboard: React.FC<DashboardProps> = ({ entries, plant, userRole }) => {
   const normalizedEntries = useMemo(() => {
     return entries.map(e => {
       const m = e.model.toUpperCase();
-      if (['CHILLER_NH', 'CHILLER_CH', 'CHILLER_ADANI', 'ADANI', 'NH'].includes(m)) return { ...e, model: 'CHILLER' };
+      if (['CHILLER', 'CHILLER_NH', 'CHILLER_CH', 'CHILLER_ADANI', 'ADANI', 'NH'].includes(m)) return { ...e, model: 'CHILLER' };
       if (m === 'CH' || m === 'DSE') return { ...e, model: 'PDX' };
       return e;
     });
@@ -253,10 +254,101 @@ const Dashboard: React.FC<DashboardProps> = ({ entries, plant, userRole }) => {
     return ACTIVITIES_LIST;
   }, [selectedModelFilter]);
 
-  const selectedUnitDetail = useMemo(() => {
+  // Start with the cached version from the global entries list
+  const cachedUnitDetail = useMemo(() => {
     if (!selectedSerial) return null;
     return unitsList.find(u => u.serialNo === selectedSerial);
   }, [selectedSerial, unitsList]);
+
+  // Fetch ALL entries for the selected unit directly from Supabase
+  // to ensure no activities are missing due to the global 1000-entry limit
+  const [fullUnitEntries, setFullUnitEntries] = useState<ProductionEntry[] | null>(null);
+
+  useEffect(() => {
+    if (!selectedSerial) {
+      setFullUnitEntries(null);
+      return;
+    }
+
+    let isActive = true;
+
+    const fetchFullUnit = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('production_entries')
+          .select('*')
+          .ilike('serial_no', selectedSerial.trim())
+          .order('production_date', { ascending: true })
+          .order('start_time', { ascending: true });
+
+        if (!isActive || error || !data) return;
+
+        const mapped: ProductionEntry[] = data.map((item: any) => ({
+          id: String(item.id),
+          plant: item.plant || 'CHAKAN',
+          stage: item.station || '',
+          productLine: item.product_line || '',
+          model: item.model || '',
+          serialNo: (item.serial_no || '').trim(),
+          unitSrNo: (item.unit_sr_no || '').trim(),
+          soSqNo: (item.so_sq_no || '').trim(),
+          productionDate: item.production_date || '',
+          endDate: item.end_date,
+          shift: item.shift || 'Shift 1',
+          activity: (item.stage || '').trim(),
+          manpower: Number(item.manpower) || 0,
+          manpowerNames: Array.isArray(item.manpower_names) ? item.manpower_names : [],
+          assignments: Array.isArray(item.shift_assignments) ? item.shift_assignments : [],
+          startTime: item.start_time || '00:00',
+          endTime: item.end_time || '00:00',
+          standardCycleTime: Number(item.standard_cycle_time) || 0,
+          actualCycleTime: Number(item.actual_cycle_time) || 0,
+          shift1ActualMinutes: Number(item.shift1_actual_minutes) || 0,
+          shift2ActualMinutes: Number(item.shift2_actual_minutes) || 0,
+          variance: Number(item.variance) || 0,
+          manhoursEngaged: Number(item.manhours_engaged) || 0,
+          lossHours: Number(item.loss_hours) || 0,
+          lossReason: item.loss_reason || '',
+          affectedParameter: item.affected_parameter,
+          defectCategory: item.defect_category,
+          issueDescription: item.issue_description,
+          notes: item.notes || '',
+          status: item.status || 'Completed',
+          is_gap: item.is_gap || false,
+          createdAt: item.created_at || new Date().toISOString(),
+          userEmail: item.user_email
+        }));
+
+        if (isActive) setFullUnitEntries(mapped);
+      } catch (err) {
+        console.warn("Full unit fetch failed, using cached data:", err);
+      }
+    };
+
+    fetchFullUnit();
+    return () => { isActive = false; };
+  }, [selectedSerial]);
+
+  // Merge: use full Supabase fetch if available, otherwise fall back to cached
+  const selectedUnitDetail = useMemo(() => {
+    if (!cachedUnitDetail) return null;
+
+    if (fullUnitEntries && fullUnitEntries.length > 0) {
+      // Replace allEntries with the complete dataset
+      const completedCount = new Set(
+        fullUnitEntries.filter(e => e.status === 'Completed' && !e.is_gap && e.activity !== "Inter-Activity Idle Time").map(e => e.activity)
+      ).size;
+
+      return {
+        ...cachedUnitDetail,
+        allEntries: fullUnitEntries,
+        completedActivities: completedCount,
+        activeActivity: getActiveActivityName(fullUnitEntries)
+      };
+    }
+
+    return cachedUnitDetail;
+  }, [cachedUnitDetail, fullUnitEntries]);
 
   const timelineNodes = useMemo(() => {
     if (!selectedUnitDetail) return [];
