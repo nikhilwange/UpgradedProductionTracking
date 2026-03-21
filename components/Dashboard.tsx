@@ -25,7 +25,7 @@ const Dashboard: React.FC<DashboardProps> = ({ entries, plant, userRole }) => {
   const normalizedEntries = useMemo(() => {
     return entries.map(e => {
       const m = e.model.toUpperCase();
-      if (['CHILLER', 'CHILLER_NH', 'CHILLER_CH', 'CHILLER_ADANI', 'ADANI', 'NH'].includes(m)) return { ...e, model: 'CHILLER' };
+      if (['CHILLER', 'CHILLER_NH', 'CHILLER_CH', 'CHILLER_ADANI', 'CHILLER_SIFY', 'ADANI', 'NH'].includes(m)) return { ...e, model: 'CHILLER' };
       if (m === 'CH' || m === 'DSE') return { ...e, model: 'PDX' };
       return e;
     });
@@ -61,7 +61,7 @@ const Dashboard: React.FC<DashboardProps> = ({ entries, plant, userRole }) => {
         modelMatch = true;
       } else if (selectedModelFilter === 'CHILLER') {
         // Group NH, CH, and ADANI under the "CHILLER" filter
-        modelMatch = ['CHILLER_NH', 'CHILLER_CH', 'CHILLER_ADANI', 'CHILLER', 'ADANI'].includes(e.model.toUpperCase());
+        modelMatch = ['CHILLER_NH', 'CHILLER_CH', 'CHILLER_ADANI', 'CHILLER_SIFY', 'CHILLER', 'ADANI'].includes(e.model.toUpperCase());
       } else {
         modelMatch = e.model.toUpperCase() === selectedModelFilter.toUpperCase();
       }
@@ -160,7 +160,7 @@ const Dashboard: React.FC<DashboardProps> = ({ entries, plant, userRole }) => {
       if (selectedModelFilter === 'All') {
         modelMatch = true;
       } else if (selectedModelFilter === 'CHILLER') {
-        modelMatch = ['CHILLER_NH', 'CHILLER_CH', 'CHILLER_ADANI', 'CHILLER', 'ADANI'].includes(u.model.toUpperCase());
+        modelMatch = ['CHILLER_NH', 'CHILLER_CH', 'CHILLER_ADANI', 'CHILLER_SIFY', 'CHILLER', 'ADANI'].includes(u.model.toUpperCase());
       } else {
         modelMatch = u.model.toUpperCase() === selectedModelFilter.toUpperCase();
       }
@@ -188,7 +188,7 @@ const Dashboard: React.FC<DashboardProps> = ({ entries, plant, userRole }) => {
       else if (m === '2X') models.add('2X');
       else if (m === '3X') models.add('3X');
       else if (m === 'STS') models.add('STS');
-      else if (['CHILLER_NH', 'CHILLER_CH', 'CHILLER_ADANI', 'CHILLER', 'ADANI'].includes(m)) models.add('CHILLER');
+      else if (['CHILLER_NH', 'CHILLER_CH', 'CHILLER_ADANI', 'CHILLER_SIFY', 'CHILLER', 'ADANI'].includes(m)) models.add('CHILLER');
       else models.add(e.model);
     });
 
@@ -197,7 +197,7 @@ const Dashboard: React.FC<DashboardProps> = ({ entries, plant, userRole }) => {
     if (p !== 'ALL' && PLANT_REGISTRY[p]) {
       Object.keys(PLANT_REGISTRY[p].models).forEach(m => {
         const up = m.toUpperCase();
-        if (['CHILLER_NH', 'CHILLER_CH', 'CHILLER_ADANI', 'CHILLER', 'ADANI'].includes(up)) models.add('CHILLER');
+        if (['CHILLER_NH', 'CHILLER_CH', 'CHILLER_ADANI', 'CHILLER_SIFY', 'CHILLER', 'ADANI'].includes(up)) models.add('CHILLER');
         else models.add(m);
       });
     }
@@ -475,7 +475,7 @@ const Dashboard: React.FC<DashboardProps> = ({ entries, plant, userRole }) => {
     if (modelToUse === '2X') return PLANT_REGISTRY.AMBERNATH.models["2X"].standards;
     if (modelToUse === '3X') return PLANT_REGISTRY.AMBERNATH.models["3X"].standards;
     if (modelToUse === 'STS') return PLANT_REGISTRY.AMBERNATH.models["STS"].standards;
-    if (['CHILLER', 'CHILLER_NH', 'CHILLER_CH', 'CHILLER_ADANI', 'ADANI'].includes(modelToUse)) {
+    if (['CHILLER', 'CHILLER_NH', 'CHILLER_CH', 'CHILLER_ADANI', 'CHILLER_SIFY', 'ADANI'].includes(modelToUse)) {
       // For standards, we need to know the specific type if possible, 
       // but if we only have "CHILLER", we default to NH
       if (modelToUse === 'CHILLER_CH') return PLANT_REGISTRY.CHAKAN.models.CHILLER_CH.standards;
