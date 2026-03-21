@@ -239,8 +239,7 @@ const App: React.FC = () => {
       let query = supabase
         .from('production_entries')
         .select('*')
-        .order('created_at', { ascending: false })
-        .limit(1000); // Optimized for most recent data visibility and network stability
+        .order('created_at', { ascending: false });
 
       // DATA ISOLATION LOGIC:
       // Admins AND Management users can see cross-plant data (Global Viewers).

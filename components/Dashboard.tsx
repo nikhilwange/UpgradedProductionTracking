@@ -578,8 +578,24 @@ const Dashboard: React.FC<DashboardProps> = ({ entries, plant, userRole }) => {
           isInProgress: true
         };
       } else {
+        let currentActivity = last.activity;
+        const unitContext = getModelContext(sn, last.model, last.plant);
+        if (unitContext.mapping) {
+          const orderedActivities: string[] = Object.values(unitContext.mapping).flat() as string[];
+          let latestSequenceIndex = -1;
+          const completedActivities = new Set(
+            unitEntries.filter(e => e.status === 'Completed').map(e => e.activity)
+          );
+          completedActivities.forEach(act => {
+            const seqIdx = orderedActivities.findIndex(a => a.trim().toUpperCase() === act.trim().toUpperCase());
+            if (seqIdx > latestSequenceIndex) {
+              latestSequenceIndex = seqIdx;
+              currentActivity = act;
+            }
+          });
+        }
         results[sn] = {
-          activity: last.activity,
+          activity: currentActivity,
           model: last.model,
           plant: last.plant,
           isInProgress: false
