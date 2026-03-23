@@ -228,7 +228,6 @@ const App: React.FC = () => {
   const fetchCloudData = async (retryCount = 0) => {
     if (!session || !userRole) return;
     
-    // Guard against offline state to prevent "Failed to fetch" noise
     if (!navigator.onLine) {
       setIsSyncing(false);
       return;
@@ -236,22 +235,38 @@ const App: React.FC = () => {
     
     setIsSyncing(true);
     try {
-      let query = supabase
-        .from('production_entries')
-        .select('*')
-        .order('created_at', { ascending: false });
+      // Supabase/PostgREST caps responses at 1000 rows by default.
+      // With 2400+ production entries, we must paginate to get ALL records.
+      const PAGE_SIZE = 1000;
+      let allData: any[] = [];
+      let from = 0;
+      let hasMore = true;
 
-      // DATA ISOLATION LOGIC:
-      // Admins AND Management users can see cross-plant data (Global Viewers).
-      if (userRole !== 'admin' && userRole !== 'management') {
-        query = query.eq('plant', homePlant);
+      while (hasMore) {
+        let query = supabase
+          .from('production_entries')
+          .select('*')
+          .order('created_at', { ascending: false })
+          .range(from, from + PAGE_SIZE - 1);
+
+        if (userRole !== 'admin' && userRole !== 'management') {
+          query = query.eq('plant', homePlant);
+        }
+
+        const { data, error } = await query;
+        if (error) throw error;
+
+        if (data && data.length > 0) {
+          allData = allData.concat(data);
+          from += PAGE_SIZE;
+          if (data.length < PAGE_SIZE) hasMore = false;
+        } else {
+          hasMore = false;
+        }
       }
 
-      const { data, error } = await query;
-
-      if (error) throw error;
-      if (data) {
-        setEntries(data.map(item => ({
+      if (allData.length > 0) {
+        setEntries(allData.map(item => ({
           id: String(item.id),
           plant: item.plant || 'CHAKAN',
           stage: item.station || '',     

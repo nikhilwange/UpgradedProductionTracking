@@ -556,6 +556,15 @@ const Dashboard: React.FC<DashboardProps> = ({ entries, plant, userRole }) => {
 
     Object.entries(unitEntriesMap).forEach(([sn, unitEntries]) => {
       const activeAct = getActiveActivityName(unitEntries);
+      if (sn === 'NH29' || sn === 'NH30') {
+        console.log(`[PIPELINE DEBUG] ${sn}:`, {
+          activeAct,
+          totalEntries: unitEntries.length,
+          completedActivities: [...new Set(unitEntries.filter(e => e.status === 'Completed').map(e => e.activity))],
+          inProgressActivities: [...new Set(unitEntries.filter(e => e.status === 'In Progress').map(e => e.activity))],
+          lastEntry: { activity: unitEntries.sort((a, b) => new Date(`${b.productionDate}T${b.startTime}`).getTime() - new Date(`${a.productionDate}T${a.startTime}`).getTime())[0]?.activity, status: unitEntries.sort((a, b) => new Date(`${b.productionDate}T${b.startTime}`).getTime() - new Date(`${a.productionDate}T${a.startTime}`).getTime())[0]?.status }
+        });
+      }
       const sorted = [...unitEntries].sort((a, b) => {
         const dateA = new Date(`${a.productionDate}T${a.startTime || '00:00'}`).getTime();
         const dateB = new Date(`${b.productionDate}T${b.startTime || '00:00'}`).getTime();
