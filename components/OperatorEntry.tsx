@@ -362,6 +362,7 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
   const idleGapMinutes = useMemo(() => {
     if (!lastLog) return 0;
     if (activeInProgressEntry) return 0;
+    if (hasOtherInProgress) return 0;
 
     const prevEndMs = toStandardMs(
       lastLog.endDate, 
@@ -384,7 +385,8 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
     lastLog, 
     productionDate, 
     startTime, 
-    activeInProgressEntry
+    activeInProgressEntry,
+    hasOtherInProgress
   ]);
 
   const calculatePredictedFinish = (startStr: string, sctMins: number) => {
@@ -574,16 +576,32 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
           }
         }
 
-        // Check OTHER activities In Progress for this serial
-        const { data: others } = await supabase
+        // Check for TRUE in-progress activities for this serial.
+        // A "true" in-progress activity has an In Progress entry but NO Completed entry
+        // for the same serial+activity. This filters out stale In Progress records that
+        // remain in the database after the activity was completed.
+        const { data: allOtherEntries } = await supabase
           .from('production_entries')
-          .select('id')
+          .select('id, stage, status')
           .ilike('serial_no', cleanSerial)
-          .eq('status', 'In Progress')
-          .neq('stage', cleanActivity);
+          .neq('stage', cleanActivity)
+          .in('status', ['In Progress', 'Completed']);
 
         if (!isActive) return;
-        setHasOtherInProgress(others && others.length > 0 ? true : false);
+
+        if (allOtherEntries && allOtherEntries.length > 0) {
+          // Build set of activities that have at least one Completed entry
+          const completedActivities = new Set(
+            allOtherEntries.filter(e => e.status === 'Completed').map(e => e.stage)
+          );
+          // A true in-progress activity has In Progress status but is NOT in the completed set
+          const trueInProgress = allOtherEntries.some(
+            e => e.status === 'In Progress' && !completedActivities.has(e.stage)
+          );
+          setHasOtherInProgress(trueInProgress);
+        } else {
+          setHasOtherInProgress(false);
+        }
 
       } catch (err) {
         if (isActive) {
