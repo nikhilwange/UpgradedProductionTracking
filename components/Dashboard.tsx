@@ -959,8 +959,24 @@ const Dashboard: React.FC<DashboardProps> = ({ entries, plant, userRole }) => {
                           </div>
                         )}
                       </div>
-                      <div className="lg:w-64 lg:pl-8 lg:border-l border-slate-100 flex items-center">
-                        {/* Structural alignment partition */}
+                      <div className="lg:w-64 lg:pl-8 lg:border-l border-slate-100 flex flex-col justify-center">
+                        {(() => {
+                          const totalLossForActivity = group.shifts.reduce((sum: number, s: ProductionEntry) => sum + (s.lossHours || 0), 0);
+                          if (totalLossForActivity <= 0 && isCompleted) return <span className="text-[10px] font-black text-emerald-500 uppercase tracking-widest">No loss</span>;
+                          if (totalLossForActivity <= 0) return null;
+                          return (
+                            <div className="space-y-1">
+                              <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Activity Loss</span>
+                              <div className="flex items-baseline gap-1.5">
+                                <span className="text-xl font-black text-rose-600">{totalLossForActivity.toFixed(2)}</span>
+                                <span className="text-xs font-bold text-rose-400">hrs</span>
+                              </div>
+                              {group.shifts.length > 1 && (
+                                <span className="text-[10px] font-bold text-slate-400">across {group.shifts.filter((s: ProductionEntry) => s.status === 'Completed').length} shifts</span>
+                              )}
+                            </div>
+                          );
+                        })()}
                       </div>
                     </div>
 
