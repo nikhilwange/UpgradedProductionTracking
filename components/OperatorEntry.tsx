@@ -670,7 +670,7 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
       if (relStart < relEnd) {
         const hasShift2 = activeShiftBoundaries.s2Start > 0;
         const hasShift3 = activeShiftBoundaries.s3Start > 0;
-        const splitPoint = hasShift2 ? (activeShiftBoundaries.s1End || 930) : 1440;
+        const splitPoint = hasShift2 ? (activeShiftBoundaries.s1End || 930) : (activeShiftBoundaries.s1End || 1440);
 
         // Shift 3 continuation: midnight (00:00) to s3End (07:00)
         // This is the overnight portion of Shift 3 from the previous day.

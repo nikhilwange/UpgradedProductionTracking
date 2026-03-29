@@ -444,7 +444,7 @@ export const CHILLER_BREAK_TIMES = [
 export const AMBERNATH_BREAK_TIMES = [
   { name: 'Lunch', start: '12:15', end: '12:45', duration: 30 },
   { name: 'Tea', start: '15:45', end: '16:00', duration: 15 },
-  { name: 'Non Working Hours', start: '17:31', end: '08:59', duration: 928 }
+  { name: 'Non Working Hours', start: '17:30', end: '09:00', duration: 930 }
 ];
 
 export const HOLIDAYS_LIST = [
