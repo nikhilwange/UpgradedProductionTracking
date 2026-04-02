@@ -13,7 +13,7 @@ export const S3_END = 420;    // 07:00 next day
 const CHAKAN_NH_STAGE_MAPPING: Record<string, string[]> = {
   "Loading": ["Frame Movement", "Evaporator Installation", "Compressor Installation", "Hydraulic Pump Assembly", "Glycol Pump Assembly", "Evaporator Inlet Pipe", "Discharge Pipe Installation", "Suction Line Installation", "Compressor Housing Mounting", "3-V Coil Mounting 1", "3-V Coil Mounting 2", "4-V Coil Mounting", "Hydraulic Pipe Line Installation", "PHE Mounting", "Hydraulic Piping-1", "Hydraulic Piping-2"],
   "Brazing": ["Discharge Line", "Liquid Line", "Glycol Expansion tanks mounting", "Fan Wiring"],
-  "Wiring": ["Insulation", "Valves Fitting", "Wiring", "Vacuuming", "Refrigerant"],
+  "Wiring": ["Insulation", "Valves Fitting", "Painting", "Wiring", "Control Panel Assembly", "Vacuuming 1", "Vacuuming 2", "Refrigerant 1", "Refrigerant 2"],
   "Dry Run Test": ["Dry Run Test"],
   "Lab": ["EOL"],
   "Finishing": ["Finishing"]
@@ -22,7 +22,7 @@ const CHAKAN_NH_STAGE_MAPPING: Record<string, string[]> = {
 const CHAKAN_CH_STAGE_MAPPING: Record<string, string[]> = {
   "Loading": ["Frame Movement", "Evaporator Installation", "Compressor Installation", "Pump Assembly", "Evaporator Inlet Pipe", "Discharge Pipe Installation", "Suction Line Installation", "Compressor Housing Mounting", "3-V Coil Mounting 1", "3-V Coil Mounting 2", "4-V Coil Mounting", "Hydraulic Pipe Line Installation"],
   "Brazing": ["Discharge Line", "Liquid Line", "Fan Wiring"],
-  "Wiring": ["Insulation", "Valves Fitting", "Wiring", "Vacuuming", "Refrigerant"],
+  "Wiring": ["Insulation", "Valves Fitting", "Painting", "Wiring", "Control Panel Assembly", "Vacuuming 1", "Vacuuming 2", "Refrigerant 1", "Refrigerant 2"],
   "Dry Run Test": ["Dry Run Test"],
   "Lab": ["EOL"],
   "Finishing": ["Finishing"]
@@ -31,7 +31,7 @@ const CHAKAN_CH_STAGE_MAPPING: Record<string, string[]> = {
 const CHAKAN_ADANI_STAGE_MAPPING: Record<string, string[]> = {
   "Loading": ["Frame Movement", "Evaporator Installation", "Compressor Installation", "Pump Assembly", "Electrical Adaptor Box Mounting", "Pump VFD Mounting", "Evaporator Inlet Pipe", "Discharge Pipe Installation", "Suction Line Installation", "Compressor Housing Mounting", "3-V Coil Mounting 1", "3-V Coil Mounting 2", "4-V Coil Mounting", "Hydraulic Pipe Line Installation"],
   "Brazing": ["Discharge Line", "Liquid Line", "Fan Wiring"],
-  "Wiring": ["Insulation", "Valves Fitting", "Wiring", "Vacuuming", "Refrigerant"],
+  "Wiring": ["Insulation", "Valves Fitting", "Painting", "Wiring", "Control Panel Assembly", "Vacuuming 1", "Vacuuming 2", "Refrigerant 1", "Refrigerant 2"],
   "Dry Run Test": ["Dry Run Test"],
   "Lab": ["EOL"],
   "Finishing": ["Finishing"]
@@ -40,14 +40,14 @@ const CHAKAN_ADANI_STAGE_MAPPING: Record<string, string[]> = {
 const CHAKAN_SIFY_STAGE_MAPPING: Record<string, string[]> = {
   "Loading": ["Frame Movement", "Evaporator Installation", "Compressor Installation", "Pump Assembly", "Active Harmonic Filter (AHF) Mounting", "Pump VFD Mounting", "Evaporator Inlet Pipe", "Discharge Pipe Installation", "Suction Line Installation", "Compressor Housing Mounting", "3-V Coil Mounting 1", "3-V Coil Mounting 2", "4-V Coil Mounting", "Hydraulic Pipe Line Installation"],
   "Brazing": ["Discharge Line", "Liquid Line", "Fan Wiring"],
-  "Wiring": ["Insulation", "Valves Fitting", "Wiring", "Vacuuming", "Refrigerant"],
+  "Wiring": ["Insulation", "Valves Fitting", "Painting", "Wiring", "Control Panel Assembly", "Vacuuming 1", "Vacuuming 2", "Refrigerant 1", "Refrigerant 2"],
   "Dry Run Test": ["Dry Run Test"],
   "Lab": ["EOL"],
   "Finishing": ["Finishing"]
 };
 
 const CHAKAN_SIFY_ACTIVITY_STANDARDS: Record<string, number> = {
-  "Frame Movement": 120, "Evaporator Installation": 66, "Compressor Installation": 144, "Pump Assembly": 40, "Active Harmonic Filter (AHF) Mounting": 45, "Pump VFD Mounting": 45, "Evaporator Inlet Pipe": 65, "Discharge Pipe Installation": 36, "Suction Line Installation": 70, "Compressor Housing Mounting": 100, "3-V Coil Mounting 1": 66, "3-V Coil Mounting 2": 66, "4-V Coil Mounting": 88, "Hydraulic Pipe Line Installation": 204, "Discharge Line": 265, "Liquid Line": 248, "Fan Wiring": 240, "Insulation": 540, "Valves Fitting": 253, "Wiring": 518, "Vacuuming": 315, "Refrigerant": 202, "Dry Run Test": 1200, "EOL": 900, "Finishing": 450
+  "Frame Movement": 120, "Evaporator Installation": 66, "Compressor Installation": 144, "Pump Assembly": 40, "Active Harmonic Filter (AHF) Mounting": 45, "Pump VFD Mounting": 45, "Evaporator Inlet Pipe": 65, "Discharge Pipe Installation": 36, "Suction Line Installation": 70, "Compressor Housing Mounting": 100, "3-V Coil Mounting 1": 66, "3-V Coil Mounting 2": 66, "4-V Coil Mounting": 88, "Hydraulic Pipe Line Installation": 204, "Discharge Line": 265, "Liquid Line": 248, "Fan Wiring": 240, "Insulation": 540, "Valves Fitting": 253, "Painting": 720, "Wiring": 518, "Control Panel Assembly": 960, "Vacuuming": 315, "Vacuuming 1": 315, "Vacuuming 2": 315, "Refrigerant": 202, "Refrigerant 1": 202, "Refrigerant 2": 202, "Dry Run Test": 1200, "EOL": 900, "Finishing": 450
 };
 
 const CHAKAN_PDX_STAGE_MAPPING: Record<string, string[]> = {
@@ -60,15 +60,15 @@ const CHAKAN_PDX_STAGE_MAPPING: Record<string, string[]> = {
 };
 
 const CHAKAN_NH_ACTIVITY_STANDARDS: Record<string, number> = {
-  "Frame Movement": 120, "Evaporator Installation": 66, "Compressor Installation": 144, "Hydraulic Pump Assembly": 40, "Glycol Pump Assembly": 40, "Evaporator Inlet Pipe": 65, "Discharge Pipe Installation": 36, "Suction Line Installation": 70, "Compressor Housing Mounting": 100, "3-V Coil Mounting 1": 66, "3-V Coil Mounting 2": 66, "4-V Coil Mounting": 88, "Hydraulic Pipe Line Installation": 204, "PHE Mounting": 300, "Hydraulic Piping-1": 450, "Hydraulic Piping-2": 450, "Discharge Line": 265, "Liquid Line": 250, "Glycol Expansion tanks mounting": 180, "Fan Wiring": 450, "Insulation": 540, "Valves Fitting": 260, "Wiring": 520, "Vacuuming": 315, "Refrigerant": 202, "Dry Run Test": 1200, "EOL": 900, "Finishing": 450
+  "Frame Movement": 120, "Evaporator Installation": 66, "Compressor Installation": 144, "Hydraulic Pump Assembly": 40, "Glycol Pump Assembly": 40, "Evaporator Inlet Pipe": 65, "Discharge Pipe Installation": 36, "Suction Line Installation": 70, "Compressor Housing Mounting": 100, "3-V Coil Mounting 1": 66, "3-V Coil Mounting 2": 66, "4-V Coil Mounting": 88, "Hydraulic Pipe Line Installation": 204, "PHE Mounting": 300, "Hydraulic Piping-1": 450, "Hydraulic Piping-2": 450, "Discharge Line": 265, "Liquid Line": 250, "Glycol Expansion tanks mounting": 180, "Fan Wiring": 450, "Insulation": 540, "Valves Fitting": 260, "Painting": 720, "Wiring": 520, "Control Panel Assembly": 960, "Vacuuming": 315, "Vacuuming 1": 315, "Vacuuming 2": 315, "Refrigerant": 202, "Refrigerant 1": 202, "Refrigerant 2": 202, "Dry Run Test": 1200, "EOL": 900, "Finishing": 450
 };
 
 const CHAKAN_CH_ACTIVITY_STANDARDS: Record<string, number> = {
-  "Frame Movement": 120, "Evaporator Installation": 66, "Compressor Installation": 144, "Pump Assembly": 40, "Evaporator Inlet Pipe": 65, "Discharge Pipe Installation": 36, "Suction Line Installation": 70, "Compressor Housing Mounting": 100, "3-V Coil Mounting 1": 66, "3-V Coil Mounting 2": 66, "4-V Coil Mounting": 88, "Hydraulic Pipe Line Installation": 204, "Discharge Line": 265, "Liquid Line": 248, "Fan Wiring": 240, "Insulation": 540, "Valves Fitting": 253, "Wiring": 518, "Vacuuming": 315, "Refrigerant": 202, "Dry Run Test": 1200, "EOL": 900, "Finishing": 450
+  "Frame Movement": 120, "Evaporator Installation": 66, "Compressor Installation": 144, "Pump Assembly": 40, "Evaporator Inlet Pipe": 65, "Discharge Pipe Installation": 36, "Suction Line Installation": 70, "Compressor Housing Mounting": 100, "3-V Coil Mounting 1": 66, "3-V Coil Mounting 2": 66, "4-V Coil Mounting": 88, "Hydraulic Pipe Line Installation": 204, "Discharge Line": 265, "Liquid Line": 248, "Fan Wiring": 240, "Insulation": 540, "Valves Fitting": 253, "Painting": 720, "Wiring": 518, "Control Panel Assembly": 960, "Vacuuming": 315, "Vacuuming 1": 315, "Vacuuming 2": 315, "Refrigerant": 202, "Refrigerant 1": 202, "Refrigerant 2": 202, "Dry Run Test": 1200, "EOL": 900, "Finishing": 450
 };
 
 const CHAKAN_ADANI_ACTIVITY_STANDARDS: Record<string, number> = {
-  "Frame Movement": 120, "Evaporator Installation": 66, "Compressor Installation": 144, "Pump Assembly": 40, "Electrical Adaptor Box Mounting": 45, "Pump VFD Mounting": 45, "Evaporator Inlet Pipe": 65, "Discharge Pipe Installation": 36, "Suction Line Installation": 70, "Compressor Housing Mounting": 100, "3-V Coil Mounting 1": 66, "3-V Coil Mounting 2": 66, "4-V Coil Mounting": 88, "Hydraulic Pipe Line Installation": 204, "Discharge Line": 265, "Liquid Line": 248, "Fan Wiring": 240, "Insulation": 540, "Valves Fitting": 253, "Wiring": 518, "Vacuuming": 315, "Refrigerant": 202, "Dry Run Test": 1200, "EOL": 900, "Finishing": 450
+  "Frame Movement": 120, "Evaporator Installation": 66, "Compressor Installation": 144, "Pump Assembly": 40, "Electrical Adaptor Box Mounting": 45, "Pump VFD Mounting": 45, "Evaporator Inlet Pipe": 65, "Discharge Pipe Installation": 36, "Suction Line Installation": 70, "Compressor Housing Mounting": 100, "3-V Coil Mounting 1": 66, "3-V Coil Mounting 2": 66, "4-V Coil Mounting": 88, "Hydraulic Pipe Line Installation": 204, "Discharge Line": 265, "Liquid Line": 248, "Fan Wiring": 240, "Insulation": 540, "Valves Fitting": 253, "Painting": 720, "Wiring": 518, "Control Panel Assembly": 960, "Vacuuming": 315, "Vacuuming 1": 315, "Vacuuming 2": 315, "Refrigerant": 202, "Refrigerant 1": 202, "Refrigerant 2": 202, "Dry Run Test": 1200, "EOL": 900, "Finishing": 450
 };
 
 const CHAKAN_PDX_ACTIVITY_STANDARDS: Record<string, number> = {
@@ -416,9 +416,15 @@ export const ACTIVITIES_LIST = [
   "Fan Wiring",
   "Insulation",
   "Valves Fitting",
+  "Painting",
   "Wiring",
+  "Control Panel Assembly",
   "Vacuuming",
+  "Vacuuming 1",
+  "Vacuuming 2",
   "Refrigerant",
+  "Refrigerant 1",
+  "Refrigerant 2",
   "Dry Run Test",
   "EOL",
   "Finishing"
