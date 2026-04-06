@@ -1092,9 +1092,20 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
                  <Tag size={14} className="text-blue-500" /> Serial Number
                </label>
                <div className="relative">
-                 <input type="text" list="serial-no-list" value={serialNo} onChange={(e) => { setSerialNo(e.target.value); setUserHasSelectedActivity(true); setScanTime(null); setScanDate(null); }} placeholder="SN..." className="w-full pl-4 py-2 bg-white border border-slate-200 rounded-[1.5rem] text-sm font-bold shadow-sm text-[#002060]" required />
-                 {isFetchingLastLog && <Loader2 size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-blue-500 animate-spin" />}
-                 <datalist id="serial-no-list">{SERIAL_NUMBERS_LIST.map(sn => <option key={sn} value={sn} />)}</datalist>
+                 <input
+                   type="text"
+                   value={serialNo}
+                   readOnly
+                   placeholder="Scan barcode to populate..."
+                   className="w-full pl-4 pr-10 py-2 bg-slate-100 border border-slate-200 rounded-[1.5rem] text-sm font-bold shadow-sm text-[#002060] cursor-not-allowed select-none"
+                   required
+                 />
+                 {isFetchingLastLog
+                   ? <Loader2 size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-blue-500 animate-spin" />
+                   : serialNo
+                     ? <CheckCircle2 size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-emerald-500" />
+                     : <Scan size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                 }
                </div>
              </div>
              <div className="space-y-2">
