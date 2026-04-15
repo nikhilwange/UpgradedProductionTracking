@@ -61,7 +61,7 @@ const GeminiInsights: React.FC<GeminiInsightsProps> = ({ entries }) => {
     if (filteredEntries.length === 0) return;
     setLoading(true);
     try {
-      const ai = new GoogleGenAI({ apiKey: 'AIzaSyAqdQ6F2dgmFJJxwbzITA0I9GvOFZihOzM' });
+      const ai = new GoogleGenAI({ apiKey: 'AIzaSyBN3rTNwVZpmZu_WkFteVeQu6hDrhgJxD8' });
       const prompt = `You are a Senior Operations Director with 20 years of experience in industrial manufacturing. 
 Analyze the following production data for Vertiv India (Industrial Cooling Units — Chillers, PDX, FWU product lines).
 
