@@ -652,13 +652,34 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
       const dateStr = formatDateISO(d);
       const isSunday = d.getDay() === 0;
       const isHoliday = HOLIDAYS_LIST.includes(dateStr);
-      const isStartDate = dateStr === productionDate;
-      const isEndDate = dateStr === endDate;
+      const isNonWorkingDay = isSunday || isHoliday;
 
-      // Skip Sundays and holidays UNLESS the operator 
-      // actually started or ended work on that day — 
-      // which proves the plant was operating.
-      if ((isSunday || isHoliday) && !isStartDate && !isEndDate) {
+      // Overtime detection on non-working days:
+      // If operator commenced OR continued working at/after operational start (07:00)
+      // on this day, it's genuine overtime — allow full shift processing.
+      // If they only worked before 07:00, it's Saturday night's Shift 3 wrapping up.
+      let isOvertimeDay = false;
+      if (isNonWorkingDay) {
+        const dayStartMs2 = new Date(`${dateStr}T00:00:00`).getTime();
+        const opStart = activeShiftBoundaries.s3End || activeShiftBoundaries.s1Start;
+        
+        if (dateStr === productionDate) {
+          // Start day: check if operator started at or after 07:00
+          const relStartOnDay = Math.max(0, (startMs - dayStartMs2) / 60000);
+          if (relStartOnDay >= opStart) isOvertimeDay = true;
+        }
+        if (dateStr === endDate) {
+          // End day: check if operator continued past 07:00
+          const relEndOnDay = Math.min(1440, (endMs - dayStartMs2) / 60000);
+          if (relEndOnDay > opStart) isOvertimeDay = true;
+        }
+      }
+
+      // Non-working day handling:
+      // - Overtime day: allow through for full shift processing
+      // - Has Shift 3 (Chakan): allow through for S3 continuation check below
+      // - No Shift 3 (Ambernath) + no overtime: skip entirely
+      if (isNonWorkingDay && !isOvertimeDay && !(activeShiftBoundaries.s3Start > 0)) {
         d.setDate(d.getDate() + 1);
         continue;
       }
@@ -677,54 +698,66 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
         // It must be checked BEFORE Shift 1 to avoid incorrectly absorbing
         // the 00:00-07:00 window into Shift 1.
         if (hasShift3 && relStart < activeShiftBoundaries.s3End) {
-          const s3ContMins = calculateNetInWindow(relStart, relEnd, 0, activeShiftBoundaries.s3End, dateStr);
-          if (s3ContMins > 0) {
-            const prevD = new Date(d);
-            prevD.setDate(prevD.getDate() - 1);
-            const prevDateStr = formatDateISO(prevD);
-            assignments.push({
-              date: prevDateStr,
-              shift: 'Shift 3',
-              minutes: s3ContMins,
-              segStart: fromMins(Math.max(relStart, 0)),
-              segEnd: fromMins(Math.min(relEnd, activeShiftBoundaries.s3End))
-            });
+          const prevD = new Date(d);
+          prevD.setDate(prevD.getDate() - 1);
+          const prevDateStr = formatDateISO(prevD);
+          const prevIsSunday = prevD.getDay() === 0;
+          const prevIsNonWorking = prevIsSunday || HOLIDAYS_LIST.includes(prevDateStr);
+
+          // Attribute overnight hours to previous day only if it was a working day.
+          // If previous day was Sunday/holiday, no Shift 3 originated that night,
+          // so these continuation hours are orphaned — skip them.
+          if (!prevIsNonWorking) {
+            const s3ContMins = calculateNetInWindow(relStart, relEnd, 0, activeShiftBoundaries.s3End, dateStr);
+            if (s3ContMins > 0) {
+              assignments.push({
+                date: prevDateStr,
+                shift: 'Shift 3',
+                minutes: s3ContMins,
+                segStart: fromMins(Math.max(relStart, 0)),
+                segEnd: fromMins(Math.min(relEnd, activeShiftBoundaries.s3End))
+              });
+            }
           }
         }
 
-        // Shift 1: s1Start (07:00) to s1End (15:30)
-        const s1ActualStart = hasShift3 ? activeShiftBoundaries.s3End : 0;
-        const s1Mins = calculateNetInWindow(relStart, relEnd, s1ActualStart, splitPoint, dateStr);
-        if (s1Mins > 0) assignments.push({ 
-          date: dateStr, 
-          shift: 'Shift 1', 
-          minutes: s1Mins, 
-          segStart: fromMins(Math.max(relStart, activeShiftBoundaries.s1Start)), 
-          segEnd: fromMins(Math.min(relEnd, splitPoint)) 
-        });
-
-        // Shift 2: s2Start (15:00) to s2End (23:30)
-        if (hasShift2) {
-          const s2End = hasShift3 ? activeShiftBoundaries.s3Start : 1440;
-          const s2Mins = calculateNetInWindow(relStart, relEnd, splitPoint, s2End, dateStr);
-          if (s2Mins > 0) assignments.push({ 
+        // Shift 1, 2, and Shift 3 end-of-day: only on working days or confirmed overtime days.
+        // On regular non-working days, only the Shift 3 continuation (00:00-07:00) above applies.
+        if (!isNonWorkingDay || isOvertimeDay) {
+          // Shift 1: s1Start (07:00) to s1End (15:30)
+          const s1ActualStart = hasShift3 ? activeShiftBoundaries.s3End : 0;
+          const s1Mins = calculateNetInWindow(relStart, relEnd, s1ActualStart, splitPoint, dateStr);
+          if (s1Mins > 0) assignments.push({ 
             date: dateStr, 
-            shift: 'Shift 2', 
-            minutes: s2Mins, 
-            segStart: fromMins(Math.max(relStart, splitPoint)), 
-            segEnd: fromMins(Math.min(relEnd, activeShiftBoundaries.s2End || S2_END)) 
+            shift: 'Shift 1', 
+            minutes: s1Mins, 
+            segStart: fromMins(Math.max(relStart, activeShiftBoundaries.s1Start)), 
+            segEnd: fromMins(Math.min(relEnd, splitPoint)) 
           });
 
-          // Shift 3 end-of-day: s3Start (23:30) to midnight
-          if (hasShift3) {
-            const s3Mins = calculateNetInWindow(relStart, relEnd, activeShiftBoundaries.s3Start, 1440, dateStr);
-            if (s3Mins > 0) assignments.push({
-              date: dateStr,
-              shift: 'Shift 3',
-              minutes: s3Mins,
-              segStart: fromMins(Math.max(relStart, activeShiftBoundaries.s3Start)),
-              segEnd: fromMins(1440)
+          // Shift 2: s2Start (15:00) to s2End (23:30)
+          if (hasShift2) {
+            const s2End = hasShift3 ? activeShiftBoundaries.s3Start : 1440;
+            const s2Mins = calculateNetInWindow(relStart, relEnd, splitPoint, s2End, dateStr);
+            if (s2Mins > 0) assignments.push({ 
+              date: dateStr, 
+              shift: 'Shift 2', 
+              minutes: s2Mins, 
+              segStart: fromMins(Math.max(relStart, splitPoint)), 
+              segEnd: fromMins(Math.min(relEnd, activeShiftBoundaries.s2End || S2_END)) 
             });
+
+            // Shift 3 end-of-day: s3Start (23:30) to midnight
+            if (hasShift3) {
+              const s3Mins = calculateNetInWindow(relStart, relEnd, activeShiftBoundaries.s3Start, 1440, dateStr);
+              if (s3Mins > 0) assignments.push({
+                date: dateStr,
+                shift: 'Shift 3',
+                minutes: s3Mins,
+                segStart: fromMins(Math.max(relStart, activeShiftBoundaries.s3Start)),
+                segEnd: fromMins(1440)
+              });
+            }
           }
         }
       }
