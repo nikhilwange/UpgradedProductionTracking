@@ -131,11 +131,13 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
   const debouncedSerialNo = useDebounce(serialNo, 600);
   const [unitSrNo, setUnitSrNo] = useState('');
   const [showSuccessOverlay, setShowSuccessOverlay] = useState(false);
+  const [model, setModel] = useState('');
+  const [productLine, setProductLine] = useState('');
   
   const filteredModels = useMemo(() => {
     const p = plant?.toUpperCase();
     if (!p || !PLANT_REGISTRY[p]) return [];
-    if (p === 'CHAKAN') return ['CHILLER', 'PDX'];
+    if (p === 'CHAKAN') return ['CHILLER', 'PDX', 'PCW', 'CRV'];
     return Object.keys(PLANT_REGISTRY[p].models);
   }, [plant]);
 
@@ -145,14 +147,16 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
     if (p === 'AMBERNATH') {
       return ['Li7', 'Li7 PCA', 'Trinergy'];
     }
-    // For Chakan, exclude Ambernath specific lines
+    // For Chakan, scope product lines to the selected model where defined
+    const mu = model?.toUpperCase();
+    if (mu === 'PDX') return ['PDX 1 / 1.5 BAY', 'PDX 2 / 3 BAY'];
+    if (mu === 'PCW') return ['PCW 3 / 4 BAY'];
+    if (mu === 'CRV') return ['CRV/CRV+'];
+    if (mu === 'CHILLER') return ['CHILLER', 'CHILLER 1', 'CHILLER 2'];
     return PRODUCT_LINES_LIST.filter(pl => 
       !['Li7', 'Li7 PCA', 'Trinergy'].includes(pl)
     );
-  }, [plant]);
-
-  const [model, setModel] = useState('');
-  const [productLine, setProductLine] = useState('');
+  }, [plant, model]);
 
   // Sync product line with model for Ambernath specific models
   useEffect(() => {
@@ -195,7 +199,7 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
   const [isScanning, setIsScanning] = useState<'scan' | null>(null);
   const scannerRef = useRef<Html5QrcodeScanner | null>(null);
 
-  const context = useMemo(() => getModelContext(serialNo, model, plant), [serialNo, model, plant]);
+  const context = useMemo(() => getModelContext(serialNo, model, plant, productLine), [serialNo, model, plant, productLine]);
   const activeStageMapping = context.mapping;
   const activeActivityStandards = context.standards;
   const activeStagesList = useMemo(() => Object.keys(activeStageMapping), [activeStageMapping]);

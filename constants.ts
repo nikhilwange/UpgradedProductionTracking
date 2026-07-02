@@ -51,12 +51,41 @@ const CHAKAN_SIFY_ACTIVITY_STANDARDS: Record<string, number> = {
 };
 
 const CHAKAN_PDX_STAGE_MAPPING: Record<string, string[]> = {
-  "Loading": ["Frame Movement", "Evaporator Installation", "Compressor Installation", "Evaporator Inlet Pipe", "Discharge Pipe Installation", "Suction Line Installation", "Compressor Housing Mounting", "V Coil Mounting"],
-  "Brazing": ["Discharge Line", "Liquid Line", "Fan Assembly", "Fan Wiring"],
-  "Wiring": ["Insulation", "Valves Fitting", "Wiring", "Vacuuming", "Refrigerant"],
-  "Dry Run Test": ["Dry Run Test"],
-  "Lab": ["EOL"],
-  "Finishing": ["Finishing"]
+  "Loading": ["Loading"],
+  "Brazing": ["Brazing"],
+  "Leak Test": ["Leak Test"],
+  "Switch Board": ["Switch Board"],
+  "Wiring": ["Wiring"],
+  "Panelling-1": ["Panelling-1"],
+  "Panelling-2": ["Panelling-2"],
+  "Dry run test": ["Dry run test"],
+  "Finishing": ["Finishing"],
+  "Packing": ["Packing"]
+};
+
+const CHAKAN_PCW_STAGE_MAPPING: Record<string, string[]> = {
+  "Loading": ["Loading"],
+  "Brazing": ["Brazing"],
+  "Leak Test + Insulation": ["Leak Test + Insulation"],
+  "Switch Board": ["Switch Board"],
+  "Fan Assembly": ["Fan Assembly"],
+  "Wiring": ["Wiring"],
+  "Panelling": ["Panelling"],
+  "Dry run test": ["Dry run test"],
+  "Finishing": ["Finishing"],
+  "Packing": ["Packing"]
+};
+
+const CHAKAN_CRV_STAGE_MAPPING: Record<string, string[]> = {
+  "Loading": ["Loading"],
+  "Brazing": ["Brazing"],
+  "Leak Test + Insulation": ["Leak Test + Insulation"],
+  "Switch Board": ["Switch Board"],
+  "Wiring": ["Wiring"],
+  "Panelling": ["Panelling"],
+  "Dry run test": ["Dry run test"],
+  "Finishing": ["Finishing"],
+  "Packing": ["Packing"]
 };
 
 const CHAKAN_NH_ACTIVITY_STANDARDS: Record<string, number> = {
@@ -71,10 +100,25 @@ const CHAKAN_ADANI_ACTIVITY_STANDARDS: Record<string, number> = {
   "Frame Movement": 120, "Evaporator Installation": 66, "Compressor Installation": 144, "Pump Assembly": 40, "Electrical Adaptor Box Mounting": 45, "Pump VFD Mounting": 45, "Evaporator Inlet Pipe": 65, "Discharge Pipe Installation": 36, "Suction Line Installation": 70, "Compressor Housing Mounting": 100, "3-V Coil Mounting 1": 66, "3-V Coil Mounting 2": 66, "4-V Coil Mounting": 88, "Hydraulic Pipe Line Installation": 204, "Discharge Line": 265, "Liquid Line": 248, "Fan Wiring": 240, "Insulation": 540, "Valves Fitting": 253, "Painting": 720, "Wiring": 518, "Control Panel Assembly": 960, "Vacuuming": 315, "Vacuuming 1": 315, "Vacuuming 2": 315, "Refrigerant": 202, "Refrigerant 1": 202, "Refrigerant 2": 202, "Dry Run Test": 883, "EOL": 900, "Finishing": 450
 };
 
-const CHAKAN_PDX_ACTIVITY_STANDARDS: Record<string, number> = {
-  ...CHAKAN_NH_ACTIVITY_STANDARDS,
-  "Dry Run Test": 1200,
-  "EOL": 900
+const CHAKAN_PDX_1_BAY_STANDARDS: Record<string, number> = {
+  "Loading": 75, "Brazing": 75, "Leak Test": 75, "Switch Board": 75, "Wiring": 75,
+  "Panelling-1": 75, "Panelling-2": 75, "Dry run test": 75, "Finishing": 75, "Packing": 75
+};
+
+const CHAKAN_PDX_2_BAY_STANDARDS: Record<string, number> = {
+  "Loading": 150, "Brazing": 150, "Leak Test": 150, "Switch Board": 150, "Wiring": 150,
+  "Panelling-1": 150, "Panelling-2": 150, "Dry run test": 150, "Finishing": 150, "Packing": 150
+};
+
+const CHAKAN_PCW_ACTIVITY_STANDARDS: Record<string, number> = {
+  "Loading": 225, "Brazing": 150, "Leak Test + Insulation": 150, "Switch Board": 225,
+  "Fan Assembly": 225, "Wiring": 150, "Panelling": 150, "Dry run test": 180,
+  "Finishing": 120, "Packing": 120
+};
+
+const CHAKAN_CRV_ACTIVITY_STANDARDS: Record<string, number> = {
+  "Loading": 150, "Brazing": 150, "Leak Test + Insulation": 150, "Switch Board": 150, "Wiring": 150, "Panelling": 150, "Dry run test": 150,
+  "Finishing": 150, "Packing": 90
 };
 
 // --- DSE Configuration (Now assigned to Chakan) ---
@@ -251,7 +295,19 @@ export const PLANT_REGISTRY: Record<string, any> = {
       },
       "PDX": {
         mapping: CHAKAN_PDX_STAGE_MAPPING,
-        standards: CHAKAN_PDX_ACTIVITY_STANDARDS
+        standards: CHAKAN_PDX_1_BAY_STANDARDS,
+        standardsByLine: {
+          "PDX 1 / 1.5 BAY": CHAKAN_PDX_1_BAY_STANDARDS,
+          "PDX 2 / 3 BAY": CHAKAN_PDX_2_BAY_STANDARDS
+        }
+      },
+      "PCW": {
+        mapping: CHAKAN_PCW_STAGE_MAPPING,
+        standards: CHAKAN_PCW_ACTIVITY_STANDARDS
+      },
+      "CRV": {
+        mapping: CHAKAN_CRV_STAGE_MAPPING,
+        standards: CHAKAN_CRV_ACTIVITY_STANDARDS
       }
     }
   },
@@ -282,7 +338,7 @@ export const PLANT_REGISTRY: Record<string, any> = {
 };
 
 // Helper to determine plant and config from Serial/Model
-export const getModelContext = (serialNo: string, model: string, currentPlant?: string) => {
+export const getModelContext = (serialNo: string, model: string, currentPlant?: string, productLine?: string) => {
   const sn = serialNo.trim().toUpperCase();
   const m = model.trim().toUpperCase();
 
@@ -313,7 +369,17 @@ export const getModelContext = (serialNo: string, model: string, currentPlant?: 
   }
 
   if (m === 'PDX' || m.includes('PDX')) {
-    return { plant: "CHAKAN", type: "PDX", ...PLANT_REGISTRY.CHAKAN.models.PDX };
+    const pdx = PLANT_REGISTRY.CHAKAN.models.PDX;
+    const lineStd = (pdx.standardsByLine && productLine) ? pdx.standardsByLine[productLine.trim()] : undefined;
+    return { plant: "CHAKAN", type: "PDX", mapping: pdx.mapping, standards: lineStd || pdx.standards };
+  }
+
+  if (m === 'PCW' || m.includes('PCW')) {
+    return { plant: "CHAKAN", type: "PCW", ...PLANT_REGISTRY.CHAKAN.models.PCW };
+  }
+
+  if (m === 'CRV' || m.includes('CRV')) {
+    return { plant: "CHAKAN", type: "CRV", ...PLANT_REGISTRY.CHAKAN.models.CRV };
   }
 
   // Logic to determine plant and model sub-type

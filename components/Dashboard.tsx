@@ -102,6 +102,7 @@ const Dashboard: React.FC<DashboardProps> = ({ entries, plant, userRole }) => {
       serialNo: string; 
       model: string; 
       plant: string;
+      productLine: string;
       completedActivities: number; 
       lastEntry: ProductionEntry;
       allEntries: ProductionEntry[];
@@ -115,6 +116,7 @@ const Dashboard: React.FC<DashboardProps> = ({ entries, plant, userRole }) => {
           serialNo: e.serialNo, 
           model: e.model, 
           plant: e.plant,
+          productLine: e.productLine,
           completedActivities: 0, 
           lastEntry: e,
           allEntries: [] 
@@ -464,7 +466,7 @@ const Dashboard: React.FC<DashboardProps> = ({ entries, plant, userRole }) => {
   const currentStandards = useMemo(() => {
     // Priority: Selected Unit's Model > Selected Model Filter > Default (NH)
     if (selectedUnitDetail) {
-      const context = getModelContext(selectedUnitDetail.serialNo, selectedUnitDetail.model, selectedUnitDetail.plant);
+      const context = getModelContext(selectedUnitDetail.serialNo, selectedUnitDetail.model, selectedUnitDetail.plant, (selectedUnitDetail as any).productLine);
       return context.standards;
     }
 
@@ -483,6 +485,8 @@ const Dashboard: React.FC<DashboardProps> = ({ entries, plant, userRole }) => {
       return PLANT_REGISTRY.CHAKAN.models.CHILLER_NH.standards;
     }
     if (modelToUse === 'PDX') return PLANT_REGISTRY.CHAKAN.models.PDX.standards;
+    if (modelToUse === 'PCW') return PLANT_REGISTRY.CHAKAN.models.PCW.standards;
+    if (modelToUse === 'CRV') return PLANT_REGISTRY.CHAKAN.models.CRV.standards;
     
     return ACTIVITY_STANDARDS;
   }, [selectedModelFilter, selectedUnitDetail]);
