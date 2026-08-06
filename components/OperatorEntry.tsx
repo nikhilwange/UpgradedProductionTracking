@@ -2,9 +2,9 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { 
   Send, Users, CalendarDays, Tag, Hash, Box, Layout, Layers, Info, Clock3, 
   ChevronDown, RefreshCw, Loader2, ArrowRight, ListChecks, X, AlertCircle, FileText, Scan, CheckCircle2, Activity,
-  Filter, ShieldCheck, Copy
+  Filter, ShieldCheck, Copy, Factory
 } from 'lucide-react';
-import { PLANT_REGISTRY, getModelContext, MODELS_LIST, PRODUCT_LINES_LIST, SERIAL_NUMBERS_LIST, BREAK_TIMES, AMBERNATH_BREAK_TIMES, CHILLER_BREAK_TIMES, OPERATORS_BY_MODEL_LINE, LOSS_PARAMETER_MAPPING, HOLIDAYS_LIST, toMins, S3_START, S3_END } from '../constants';
+import { PLANT_REGISTRY, getModelContext, MODELS_LIST, PRODUCT_LINES_LIST, SERIAL_NUMBERS_LIST, BREAK_TIMES, AMBERNATH_BREAK_TIMES, AMB_S1_START, AMB_S1_END, AMB_S2_START, AMB_S2_END, CHILLER_BREAK_TIMES, OPERATORS_BY_MODEL_LINE, LOSS_PARAMETER_MAPPING, HOLIDAYS_LIST, toMins, S3_START, S3_END, resolveIdentityFromSerial } from '../constants';
 import { ProductionEntry } from '../types';
 import { supabase } from '../supabase';
 import { Html5QrcodeScanner } from 'html5-qrcode';
@@ -133,16 +133,28 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
   const [showSuccessOverlay, setShowSuccessOverlay] = useState(false);
   const [model, setModel] = useState('');
   const [productLine, setProductLine] = useState('');
-  
+
+  // --- Plant scope ---------------------------------------------------------
+  // Admin and Management have universal access and may log entries for either
+  // plant. Operators remain locked to their assigned home plant.
+  const canSwitchPlant = userRole === 'admin' || userRole === 'management';
+  const [activePlant, setActivePlant] = useState<string>(plant || 'CHAKAN');
+
+  useEffect(() => {
+    if (!canSwitchPlant) setActivePlant(plant);
+    else if (!activePlant) setActivePlant(plant || 'CHAKAN');
+  }, [plant, canSwitchPlant]);
+  // -------------------------------------------------------------------------
+
   const filteredModels = useMemo(() => {
-    const p = plant?.toUpperCase();
+    const p = activePlant?.toUpperCase();
     if (!p || !PLANT_REGISTRY[p]) return [];
     if (p === 'CHAKAN') return ['CHILLER', 'PDX', 'PCW', 'CRV'];
     return Object.keys(PLANT_REGISTRY[p].models);
-  }, [plant]);
+  }, [activePlant]);
 
   const filteredProductLines = useMemo(() => {
-    const p = plant?.toUpperCase();
+    const p = activePlant?.toUpperCase();
     // For Ambernath, product lines are Li7, Li7 PCA, and Trinergy
     if (p === 'AMBERNATH') {
       return ['Li7', 'Li7 PCA', 'Trinergy'];
@@ -156,18 +168,17 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
     return PRODUCT_LINES_LIST.filter(pl => 
       !['Li7', 'Li7 PCA', 'Trinergy'].includes(pl)
     );
-  }, [plant, model]);
+  }, [activePlant, model]);
 
-  // Sync product line with model for Ambernath specific models
+  // Ambernath: the model fully determines the product line.
+  // Li7 -> Li7 | Li7 PCA -> Li7 PCA | 2X / 3X / STS -> Trinergy
   useEffect(() => {
-    if (plant?.toUpperCase() === 'AMBERNATH') {
-      if (['2X', '3X', 'STS'].includes(model)) {
-        setProductLine('Trinergy');
-      } else if (['Li7', 'Li7 PCA', 'Trinergy'].includes(model)) {
-        setProductLine(model);
-      }
-    }
-  }, [model, plant]);
+    if (activePlant?.toUpperCase() !== 'AMBERNATH' || !model) return;
+    const m = model.trim().toUpperCase();
+    if (m === '2X' || m === '3X' || m === 'STS') setProductLine('Trinergy');
+    else if (m === 'LI7 PCA') setProductLine('Li7 PCA');
+    else if (m === 'LI7') setProductLine('Li7');
+  }, [model, activePlant]);
 
   useEffect(() => {
     if (filteredModels.length > 0 && !filteredModels.includes(model)) {
@@ -181,25 +192,11 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
     }
   }, [filteredProductLines, productLine]);
 
-  // Auto-select product line based on model for Ambernath
-  useEffect(() => {
-    if (plant === 'AMBERNATH' && model) {
-      const m = model.toUpperCase();
-      if (['2X', '3X', 'STS'].includes(m)) {
-        setProductLine('Trinergy');
-      } else if (m === 'LI7') {
-        setProductLine('Li7');
-      } else if (m === 'LI7 PCA') {
-        setProductLine('Li7 PCA');
-      }
-    }
-  }, [model, plant]);
-
   const [activeInProgressEntry, setActiveInProgressEntry] = useState<ProductionEntry | null>(null);
   const [isScanning, setIsScanning] = useState<'scan' | null>(null);
   const scannerRef = useRef<Html5QrcodeScanner | null>(null);
 
-  const context = useMemo(() => getModelContext(serialNo, model, plant, productLine), [serialNo, model, plant, productLine]);
+  const context = useMemo(() => getModelContext(serialNo, model, activePlant, productLine), [serialNo, model, activePlant, productLine]);
   const activeStageMapping = context.mapping;
   const activeActivityStandards = context.standards;
   const activeStagesList = useMemo(() => Object.keys(activeStageMapping), [activeStageMapping]);
@@ -287,17 +284,14 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
   const activeShiftBoundaries = useMemo(() => {
     const m = model.toUpperCase();
     if (m === 'LI7' || m === 'LI7 PCA' || m === '2X' || m === '3X' || m === 'STS') {
-      const nonWorking = AMBERNATH_BREAK_TIMES.find(b => b.name === 'Non Working Hours');
-      if (nonWorking) {
-        return {
-          s1Start: toMins(nonWorking.end),
-          s1End: toMins(nonWorking.start),
-          s2Start: 0,
-          s2End: 0,
-          s3Start: 0,
-          s3End: 0
-        };
-      }
+      return {
+        s1Start: AMB_S1_START,
+        s1End: AMB_S1_END,
+        s2Start: AMB_S2_START,
+        s2End: AMB_S2_END,
+        s3Start: 0,
+        s3End: 0
+      };
     }
     if (m === 'CHILLER' || m === 'VANTAGE' || m === 'ADANI') {
       return {
@@ -393,6 +387,59 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
     hasOtherInProgress
   ]);
 
+  // Builds the working-time segments of a single day: the operational window
+  // (derived from 'Non Working Hours', or the full day when none is defined)
+  // minus every break, sorted chronologically.
+  const buildDaySegments = () => {
+    const nw = activeBreaks.find(b => b.name === 'Non Working Hours');
+    const OP_START = nw ? toMins(nw.end) : 0;
+    const OP_END = nw ? toMins(nw.start) : 1440;
+    const brs = activeBreaks
+      .filter(b => b.name !== 'Non Working Hours')
+      .map(b => ({ s: toMins(b.start), e: toMins(b.end) }))
+      .filter(b => b.e > OP_START && b.s < OP_END)
+      .sort((a, b) => a.s - b.s);
+    const segs: { s: number; e: number }[] = [];
+    let c = OP_START;
+    brs.forEach(b => {
+      if (b.s > c) segs.push({ s: c, e: Math.min(b.s, OP_END) });
+      c = Math.max(c, b.e);
+    });
+    if (c < OP_END) segs.push({ s: c, e: OP_END });
+    return segs;
+  };
+
+  // Consumes the standard cycle time across working segments, rolling forward
+  // over nights, Sundays and holidays. Returns both date and time.
+  const calculatePredictedFinishDated = (startDateStr: string, startStr: string, sctMins: number) => {
+    const fmt = (m: number) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+    const segs = buildDaySegments();
+    if (!segs.length || sctMins <= 0) return { date: startDateStr, time: startStr };
+
+    let remaining = sctMins;
+    const d = new Date(`${startDateStr}T00:00:00`);
+    let cursor = toMins(startStr);
+    let guard = 0;
+
+    while (remaining > 0 && guard < 400) {
+      guard++;
+      const dateStr = formatDateISO(d);
+      const isNonWorkingDay = d.getDay() === 0 || HOLIDAYS_LIST.includes(dateStr);
+      if (!isNonWorkingDay) {
+        for (const sg of segs) {
+          const s = Math.max(cursor, sg.s);
+          if (s >= sg.e) continue;
+          const avail = sg.e - s;
+          if (remaining <= avail) return { date: dateStr, time: fmt(s + remaining) };
+          remaining -= avail;
+        }
+      }
+      d.setDate(d.getDate() + 1);
+      cursor = 0;
+    }
+    return { date: formatDateISO(d), time: fmt(toMins(startStr)) };
+  };
+
   const calculatePredictedFinish = (startStr: string, sctMins: number) => {
     const parseMins = (t: string) => { const [h, m] = t.split(':').map(Number); return (h || 0) * 60 + (m || 0); };
     const formatMins = (m: number) => { const h = Math.floor(m / 60) % 24; const mm = m % 60; return `${String(h).padStart(2, '0')}:${String(mm).padStart(2, '0')}`; };
@@ -419,9 +466,15 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
   useEffect(() => {
     if (!activeInProgressEntry) {
       const standard = activeActivityStandards[activity] || 0;
-      if (standard > 0 && startTime) { const prediction = calculatePredictedFinish(startTime, standard); setEndTime(prediction); }
+      if (standard > 0 && startTime && productionDate) {
+        const prediction = calculatePredictedFinishDated(productionDate, startTime, standard);
+        setEndDate(prediction.date);
+        setEndTime(prediction.time);
+      } else if (productionDate) {
+        setEndDate(productionDate);
+      }
     }
-  }, [startTime, activity, activeActivityStandards, activeInProgressEntry]);
+  }, [startTime, productionDate, activity, activeActivityStandards, activeInProgressEntry]);
 
   useEffect(() => {
     let isActive = true;
@@ -621,7 +674,7 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
 
   }, [debouncedSerialNo, activity, scanTrigger]);
 
-  useEffect(() => { if (!activeInProgressEntry) setEndDate(productionDate); }, [productionDate, activeInProgressEntry]);
+  // endDate is now managed by the predicted-finish effect above (see Prompt 7).
 
   const calculateNetInWindow = (start: number, end: number, winStart: number, winEnd: number, dateStr?: string) => {
     const s = Math.max(start, winStart);
@@ -729,7 +782,7 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
         // On regular non-working days, only the Shift 3 continuation (00:00-07:00) above applies.
         if (!isNonWorkingDay || isOvertimeDay) {
           // Shift 1: s1Start (07:00) to s1End (15:30)
-          const s1ActualStart = hasShift3 ? activeShiftBoundaries.s3End : 0;
+          const s1ActualStart = hasShift3 ? activeShiftBoundaries.s3End : activeShiftBoundaries.s1Start;
           const s1Mins = calculateNetInWindow(relStart, relEnd, s1ActualStart, splitPoint, dateStr);
           if (s1Mins > 0) assignments.push({ 
             date: dateStr, 
@@ -741,7 +794,7 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
 
           // Shift 2: s2Start (15:00) to s2End (23:30)
           if (hasShift2) {
-            const s2End = hasShift3 ? activeShiftBoundaries.s3Start : 1440;
+            const s2End = hasShift3 ? activeShiftBoundaries.s3Start : (activeShiftBoundaries.s2End || 1440);
             const s2Mins = calculateNetInWindow(relStart, relEnd, splitPoint, s2End, dateStr);
             if (s2Mins > 0) assignments.push({ 
               date: dateStr, 
@@ -847,24 +900,47 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
       return list.find(item => item.trim().toUpperCase() === scannedValue.toUpperCase());
     };
 
+    let scannedSerial = '';
+    let qrModel: string | null | undefined = null;
+    let qrLine: string | null | undefined = null;
+
     if (parts.length >= 5) {
       setUnitSrNo(parts[0]);
+      scannedSerial = parts[1];
       setSerialNo(parts[1]);
-      const matchedModel = findMatchingValue(MODELS_LIST, parts[2]);
-      if (matchedModel) setModel(matchedModel);
-      const matchedLine = findMatchingValue(PRODUCT_LINES_LIST, parts[3]);
-      if (matchedLine) setProductLine(matchedLine);
+      qrModel = findMatchingValue(MODELS_LIST, parts[2]);
+      qrLine = findMatchingValue(PRODUCT_LINES_LIST, parts[3]);
       setSoSqNo(parts[4]);
     } else if (parts.length === 4) {
+      scannedSerial = parts[0];
       setSerialNo(parts[0]);
-      const matchedModel = findMatchingValue(MODELS_LIST, parts[1]);
-      if (matchedModel) setModel(matchedModel);
-      const matchedLine = findMatchingValue(PRODUCT_LINES_LIST, parts[2]);
-      if (matchedLine) setProductLine(matchedLine);
+      qrModel = findMatchingValue(MODELS_LIST, parts[1]);
+      qrLine = findMatchingValue(PRODUCT_LINES_LIST, parts[2]);
       setSoSqNo(parts[3]);
     } else {
+      scannedSerial = parts[0];
       setSerialNo(parts[0]);
     }
+
+    // --- Identity resolution ------------------------------------------------
+    // The SERIAL NUMBER is authoritative for plant / model / product line.
+    // The model and line tokens inside the QR payload are only a fallback,
+    // because label formats vary and rarely match the master lists exactly.
+    const identity = resolveIdentityFromSerial(scannedSerial);
+
+    if (identity) {
+      // Admin / Management follow the scanned unit to its own plant.
+      if (canSwitchPlant && identity.plant !== activePlant) {
+        setActivePlant(identity.plant);
+      }
+      setModel(identity.model);
+      if (identity.productLine) setProductLine(identity.productLine);
+      else if (qrLine) setProductLine(qrLine);
+    } else {
+      if (qrModel) setModel(qrModel);
+      if (qrLine) setProductLine(qrLine);
+    }
+    // ------------------------------------------------------------------------
   };
 
   const stopScanner = () => {
@@ -1035,11 +1111,11 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
   const availableOperators = useMemo(() => {
     if (!productLine || !model) return [];
     // For Ambernath, prefer model lookup to ensure correct operator list
-    if (plant?.toUpperCase() === 'AMBERNATH') {
+    if (activePlant?.toUpperCase() === 'AMBERNATH') {
       return OPERATORS_BY_MODEL_LINE[model] || OPERATORS_BY_MODEL_LINE[productLine] || [];
     }
     return OPERATORS_BY_MODEL_LINE[productLine] || OPERATORS_BY_MODEL_LINE[model] || [];
-  }, [model, productLine, plant]);
+  }, [model, productLine, activePlant]);
 
   return (
     <div className="max-w-6xl mx-auto py-4">
@@ -1085,7 +1161,33 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
         </div>
 
         <form onSubmit={handleSubmit} className="p-8 space-y-8">
-          <div className="flex justify-center pb-4"><button type="button" onClick={startScanner} className="flex items-center gap-3 px-8 py-4 bg-blue-600 text-white rounded-2xl font-black text-sm uppercase tracking-widest hover:bg-blue-700 shadow-xl shadow-blue-500/20 active:scale-95 transition-all"><Scan size={20} /> Barcode Scan Unit</button></div>
+          <div className="flex flex-col items-center gap-4 pb-4">
+            {canSwitchPlant && (
+              <div className="flex items-center gap-2 bg-slate-900/5 p-1.5 rounded-2xl border border-slate-200">
+                <div className="p-1.5 bg-white rounded-lg shadow-sm">
+                  <Factory size={14} className="text-blue-500" />
+                </div>
+                <div className="flex gap-1">
+                  {Object.keys(PLANT_REGISTRY).map((p) => (
+                    <button
+                      key={p}
+                      type="button"
+                      disabled={!!activeInProgressEntry}
+                      onClick={() => setActivePlant(p)}
+                      className={`px-4 py-1.5 rounded-xl text-[11px] font-black uppercase tracking-wider transition-all disabled:opacity-40 disabled:cursor-not-allowed ${
+                        activePlant?.toUpperCase() === p
+                          ? 'bg-blue-600 text-white shadow-md'
+                          : 'text-slate-500 hover:text-slate-900'
+                      }`}
+                    >
+                      {p}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+            <button type="button" onClick={startScanner} className="flex items-center gap-3 px-8 py-4 bg-blue-600 text-white rounded-2xl font-black text-sm uppercase tracking-widest hover:bg-blue-700 shadow-xl shadow-blue-500/20 active:scale-95 transition-all"><Scan size={20} /> Barcode Scan Unit</button>
+          </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-7 gap-4">
              <div className="space-y-2">

@@ -397,6 +397,39 @@ export const getModelContext = (serialNo: string, model: string, currentPlant?: 
   return { plant: "CHAKAN", type: "CHILLER_NH", ...PLANT_REGISTRY.CHAKAN.models.CHILLER_NH };
 };
 
+// --- Serial-driven identity resolver (used by barcode/QR scan) ---
+// The serial number is the authoritative source of truth for plant, model and
+// product line. Returns null when the serial pattern is not recognised, so the
+// caller can fall back to whatever the QR payload declared.
+export const resolveIdentityFromSerial = (
+  serialNo: string
+): { plant: string; model: string; productLine: string } | null => {
+  if (!serialNo) return null;
+  // Normalise: uppercase, strip spaces / hyphens / underscores / dots
+  const sn = serialNo.toUpperCase().replace(/[\s\-_.]/g, '');
+  if (!sn) return null;
+
+  // --- AMBERNATH (model fully determines the product line) ---
+  // ORDER MATTERS: LI7PCA must be tested before LI7.
+  if (sn.startsWith('LI7PCA')) return { plant: 'AMBERNATH', model: 'Li7 PCA', productLine: 'Li7 PCA' };
+  if (sn.startsWith('LI7'))    return { plant: 'AMBERNATH', model: 'Li7',     productLine: 'Li7' };
+  if (sn.startsWith('TRINERGYSTS') || sn.startsWith('STS')) return { plant: 'AMBERNATH', model: 'STS', productLine: 'Trinergy' };
+  if (sn.startsWith('TRINERGY2X')  || sn.startsWith('2X'))  return { plant: 'AMBERNATH', model: '2X',  productLine: 'Trinergy' };
+  if (sn.startsWith('TRINERGY3X')  || sn.startsWith('3X'))  return { plant: 'AMBERNATH', model: '3X',  productLine: 'Trinergy' };
+
+  // --- CHAKAN (model only; product line stays with the QR / user selection,
+  // because CHILLER 1 vs CHILLER 2 and the PDX bay variants are not encoded
+  // in the serial) ---
+  if (sn.startsWith('PDX')) return { plant: 'CHAKAN', model: 'PDX', productLine: '' };
+  if (sn.startsWith('PCW')) return { plant: 'CHAKAN', model: 'PCW', productLine: '' };
+  if (sn.startsWith('CRV')) return { plant: 'CHAKAN', model: 'CRV', productLine: '' };
+  if (sn.startsWith('NH') || sn.startsWith('CH') || sn.startsWith('SIFY') || sn.startsWith('ADANI')) {
+    return { plant: 'CHAKAN', model: 'CHILLER', productLine: '' };
+  }
+
+  return null;
+};
+
 export const STAGE_MAPPING = CHAKAN_NH_STAGE_MAPPING; // Legacy compatibility
 export const ACTIVITY_STANDARDS = CHAKAN_NH_ACTIVITY_STANDARDS; // Legacy compatibility
 // Export STAGES_LIST for admin console compatibility
@@ -514,10 +547,21 @@ export const CHILLER_BREAK_TIMES = [
   { name: 'Tea Break',      start: '05:00', end: '05:15', duration: 15 },
 ];
 
+// --- Ambernath plant: 2-shift operation (Li7, Li7 PCA, 2X, 3X, STS) ---
+// Shift 1: 06:45 - 15:00  |  Shift 2: 14:45 - 23:00 (15 min handover overlap)
+export const AMB_S1_START = 405;   // 06:45
+export const AMB_S1_END   = 900;   // 15:00
+export const AMB_S2_START = 885;   // 14:45
+export const AMB_S2_END   = 1380;  // 23:00
+
+// Break names MUST be unique — calculatePredictedFinish de-duplicates by name,
+// so two entries both called 'Tea' would silently apply only once.
 export const AMBERNATH_BREAK_TIMES = [
-  { name: 'Lunch', start: '12:15', end: '12:45', duration: 30 },
-  { name: 'Tea', start: '15:45', end: '16:00', duration: 15 },
-  { name: 'Non Working Hours', start: '17:30', end: '09:00', duration: 930 }
+  { name: 'Lunch',             start: '11:30', end: '12:00', duration: 30 },
+  { name: 'Tea (Shift 1)',     start: '15:00', end: '15:15', duration: 15 },
+  { name: 'Tea (Shift 2)',     start: '17:45', end: '18:00', duration: 15 },
+  { name: 'Dinner',            start: '20:30', end: '21:00', duration: 30 },
+  { name: 'Non Working Hours', start: '23:00', end: '06:45', duration: 465 }
 ];
 
 export const HOLIDAYS_LIST = [

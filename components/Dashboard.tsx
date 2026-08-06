@@ -138,6 +138,16 @@ const Dashboard: React.FC<DashboardProps> = ({ entries, plant, userRole }) => {
   }, [normalizedEntries]);
 
   // Filtered unit dropdown list
+  // Terminal activity is the last entry in the model's own stage mapping.
+  // Registry-driven so every model — current and future, both plants — is correct.
+  const getTerminalActivity = (serialNo: string, model: string, plantName: string, productLine?: string): string => {
+    try {
+      const ctx = getModelContext(serialNo, model, plantName, productLine);
+      const ordered = Object.values(ctx.mapping || {}).flat() as string[];
+      return (ordered[ordered.length - 1] || '').trim().toUpperCase();
+    } catch (e) { return ''; }
+  };
+
   const FINISHING_ACTIVITIES = [
     'Finishing',
     'Finishing Activity',
@@ -147,8 +157,13 @@ const Dashboard: React.FC<DashboardProps> = ({ entries, plant, userRole }) => {
   const isUnitCompleted = (u: typeof unitsList[0]): boolean => {
     const today = new Date();
     const currentYearMonth = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`;
+    const terminal = getTerminalActivity(u.serialNo, u.model, u.plant, u.productLine);
     const finishingEntry = u.allEntries
-      .filter(e => FINISHING_ACTIVITIES.includes(e.activity) && e.status === 'Completed')
+      .filter(e => {
+        const act = (e.activity || '').trim().toUpperCase();
+        return e.status === 'Completed' &&
+          (terminal ? act === terminal : FINISHING_ACTIVITIES.map(f => f.toUpperCase()).includes(act));
+      })
       .sort((a, b) => new Date(b.productionDate).getTime() - new Date(a.productionDate).getTime())[0];
     if (!finishingEntry) return false;
     const entryMonth = finishingEntry.productionDate.substring(0, 7);
@@ -235,26 +250,6 @@ const Dashboard: React.FC<DashboardProps> = ({ entries, plant, userRole }) => {
       setSelectedSerial(null);
     }
   }, [filteredUnitsList, selectedSerial]);
-
-  const pipelineActivities = useMemo(() => {
-    const m = selectedModelFilter.toUpperCase();
-    if (m === 'ALL' || m === 'CHILLER') return ACTIVITIES_LIST;
-
-    // Search for model in PLANT_REGISTRY
-    const plants = Object.keys(PLANT_REGISTRY);
-    for (const pKey of plants) {
-      const plantData = PLANT_REGISTRY[pKey as keyof typeof PLANT_REGISTRY];
-      const modelKeys = Object.keys(plantData.models);
-      const foundKey = modelKeys.find(k => k.toUpperCase() === m);
-      if (foundKey) {
-        const modelConfig = (plantData.models as any)[foundKey];
-        return Object.values(modelConfig.mapping).flat() as string[];
-      }
-    }
-
-    // For general/mixed pipeline, use the Chakan baseline
-    return ACTIVITIES_LIST;
-  }, [selectedModelFilter]);
 
   // Start with the cached version from the global entries list
   const cachedUnitDetail = useMemo(() => {
@@ -351,6 +346,40 @@ const Dashboard: React.FC<DashboardProps> = ({ entries, plant, userRole }) => {
 
     return cachedUnitDetail;
   }, [cachedUnitDetail, fullUnitEntries]);
+
+  const pipelineActivities = useMemo(() => {
+    // A selected unit always wins over the filter — otherwise an Ambernath unit
+    // viewed under the "All" filter is measured against the Chakan chiller list.
+    if (selectedUnitDetail) {
+      try {
+        const ctx = getModelContext(
+          selectedUnitDetail.serialNo,
+          selectedUnitDetail.model,
+          selectedUnitDetail.plant,
+          (selectedUnitDetail as any).productLine
+        );
+        const ordered = Object.values(ctx.mapping || {}).flat() as string[];
+        if (ordered.length) return ordered;
+      } catch (e) { /* fall through to filter-based resolution */ }
+    }
+    const m = selectedModelFilter.toUpperCase();
+    if (m === 'ALL' || m === 'CHILLER') return ACTIVITIES_LIST;
+
+    // Search for model in PLANT_REGISTRY
+    const plants = Object.keys(PLANT_REGISTRY);
+    for (const pKey of plants) {
+      const plantData = PLANT_REGISTRY[pKey as keyof typeof PLANT_REGISTRY];
+      const modelKeys = Object.keys(plantData.models);
+      const foundKey = modelKeys.find(k => k.toUpperCase() === m);
+      if (foundKey) {
+        const modelConfig = (plantData.models as any)[foundKey];
+        return Object.values(modelConfig.mapping).flat() as string[];
+      }
+    }
+
+    // For general/mixed pipeline, use the Chakan baseline
+    return ACTIVITIES_LIST;
+  }, [selectedModelFilter, selectedUnitDetail]);
 
   const timelineNodes = useMemo(() => {
     if (!selectedUnitDetail) return [];
