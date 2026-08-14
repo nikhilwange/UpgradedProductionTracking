@@ -2,6 +2,7 @@
   "name": "Vertiv ProTrack - Barcode Scanner",
   "description": "A high-performance production line simulation and digitalization dashboard that tracks cycle times, variances, manhours, and stage-wise losses for industrial manufacturing monitoring.",
   "requestFramePermissions": [
-    "camera"
+    "camera",
+    "microphone"
   ]
 }

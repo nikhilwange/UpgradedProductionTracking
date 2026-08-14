@@ -128,7 +128,7 @@ const App: React.FC = () => {
       try {
         const sessionPromise = supabase.auth.getSession();
         const timeoutPromise = new Promise((_, reject) => 
-          setTimeout(() => reject(new Error("Auth check timeout")), 12000)
+          setTimeout(() => reject(new Error("Auth check timeout")), 45000)
         );
         
         const result: any = await Promise.race([sessionPromise, timeoutPromise]);
@@ -161,8 +161,8 @@ const App: React.FC = () => {
         }
       } catch (err: any) {
         const msg = err.message?.toLowerCase() || '';
-        if (msg.includes('token') || msg.includes('refresh') || msg.includes('jwt') || msg.includes('not found') || msg.includes('exp')) {
-          console.warn("Initialization check failed due to invalid token. Clearing session.");
+        if (msg.includes('token') || msg.includes('refresh') || msg.includes('jwt') || msg.includes('not found') || msg.includes('exp') || msg.includes('timeout')) {
+          console.warn("Initialization check failed due to invalid token or timeout. Clearing session.");
           supabase.auth.signOut().catch(() => {});
           clearLocalCaches();
           setSession(null);

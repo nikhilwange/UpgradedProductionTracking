@@ -8,6 +8,7 @@ import { PLANT_REGISTRY, getModelContext, MODELS_LIST, PRODUCT_LINES_LIST, SERIA
 import { ProductionEntry } from '../types';
 import { supabase } from '../supabase';
 import { Html5QrcodeScanner } from 'html5-qrcode';
+import VoiceInput from './VoiceInput';
 
 const useDebounce = (value: string, delay: number) => {
   const [debouncedValue, setDebouncedValue] = useState(value);
@@ -968,6 +969,24 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
     setAssignmentInputs(prev => ({ ...prev, ...updates }));
   };
 
+  // Single write path for Issue Description (used by both keyboard and voice input).
+  // Preserves existing behaviour: editing the FIRST shift card overwrites all other shift rows.
+  const setShiftIssueDescription = (key: string, val: string, isFirstShift: boolean) => {
+    setAssignmentInputs(prev => {
+      const updated = { ...prev, [key]: { ...prev[key], issueDescription: val } };
+      if (isFirstShift) {
+        multiDaySplits.forEach(s => {
+          const k2 = `${s.date}-${s.shift}`;
+          if (k2 !== key) {
+            const existing = (prev[k2] as AssignmentInput) || { operators: [], count: 0, affectedParameter: '', defectCategory: '', issueDescription: '' };
+            updated[k2] = { ...existing, issueDescription: val };
+          }
+        });
+      }
+      return updated;
+    });
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const isBlockingStart = !activeInProgressEntry && isAlreadyLogged;
@@ -1476,27 +1495,19 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
                             </div>
                           </div>
                           <div className="space-y-1">
-                            <label className="text-xs font-bold text-slate-500 uppercase flex items-center gap-2 ml-1">
-                              <FileText size={14} className="text-rose-500" /> Issue Description
-                            </label>
+                            <div className="flex items-center justify-between gap-3 flex-wrap">
+                              <label className="text-xs font-bold text-slate-500 uppercase flex items-center gap-2 ml-1">
+                                <FileText size={14} className="text-rose-500" /> Issue Description
+                              </label>
+                              <VoiceInput
+                                tone="rose"
+                                currentText={input.issueDescription || ''}
+                                onTranscript={(merged) => setShiftIssueDescription(key, merged, multiDaySplits.indexOf(split) === 0)}
+                              />
+                            </div>
                             <textarea value={input.issueDescription} onChange={(e) => {
-                              const val = e.target.value;
-                              setAssignmentInputs(prev => {
-                                const updated = { ...prev, [key]: { ...prev[key], issueDescription: val } };
-                                // Always overwrite ALL other shift rows if this is the first shift card
-                                const isFirstShift = multiDaySplits.indexOf(split) === 0;
-                                if (isFirstShift) {
-                                  multiDaySplits.forEach(s => {
-                                    const k2 = `${s.date}-${s.shift}`;
-                                    if (k2 !== key) {
-                                      const existing = (prev[k2] as AssignmentInput) || { operators: [], count: 0, affectedParameter: '', defectCategory: '', issueDescription: '' };
-                                      updated[k2] = { ...existing, issueDescription: val };
-                                    }
-                                  });
-                                }
-                                return updated;
-                              });
-                            }} placeholder="Describe the bottleneck..." className="w-full px-5 py-2 bg-white border border-slate-200 rounded-2xl text-xs font-bold min-h-[60px] text-[#002060]" rows={2} />
+                              setShiftIssueDescription(key, e.target.value, multiDaySplits.indexOf(split) === 0);
+                            }} placeholder="Type, or tap Speak and describe the bottleneck in English / Hindi / Marathi…" className="w-full px-5 py-2 bg-white border border-slate-200 rounded-2xl text-xs font-bold min-h-[60px] text-[#002060]" rows={2} />
                           </div>
                         </div>
                       )}
@@ -1555,10 +1566,17 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
                     </div>
                   </div>
                   <div className="space-y-1.5">
-                    <label className="text-[11px] font-black text-indigo-900 uppercase tracking-widest ml-1 flex items-center gap-2">
-                      <FileText size={14} /> Issue Description
-                    </label>
-                    <textarea value={idleAttribution.issueDescription} onChange={(e) => setIdleAttribution(prev => ({ ...prev, issueDescription: e.target.value }))} placeholder="Explain the idle phase bottleneck..." className="w-full px-5 py-4 bg-white border border-indigo-100 rounded-[1.5rem] text-sm font-bold min-h-[100px] text-[#002060]" required />
+                    <div className="flex items-center justify-between gap-3 flex-wrap">
+                      <label className="text-[11px] font-black text-indigo-900 uppercase tracking-widest ml-1 flex items-center gap-2">
+                        <FileText size={14} /> Issue Description
+                      </label>
+                      <VoiceInput
+                        tone="indigo"
+                        currentText={idleAttribution.issueDescription || ''}
+                        onTranscript={(merged) => setIdleAttribution(prev => ({ ...prev, issueDescription: merged }))}
+                      />
+                    </div>
+                    <textarea value={idleAttribution.issueDescription} onChange={(e) => setIdleAttribution(prev => ({ ...prev, issueDescription: e.target.value }))} placeholder="Type, or tap Speak to explain the idle phase bottleneck..." className="w-full px-5 py-4 bg-white border border-indigo-100 rounded-[1.5rem] text-sm font-bold min-h-[100px] text-[#002060]" required />
                   </div>
                 </>
               )}
