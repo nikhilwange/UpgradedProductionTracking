@@ -929,11 +929,15 @@ const Dashboard: React.FC<DashboardProps> = ({ entries, plant, userRole }) => {
                         <div className="space-y-3">
                           <div className="flex items-center justify-between gap-4">
                             <span className="text-xs font-bold text-blue-600">Idle Start</span>
-                            <span className="bg-blue-50 px-3 py-1 rounded-lg text-xs font-black text-blue-900">{formatTimeDisplay(node.idleStart)}</span>
+                            <span className="bg-blue-50 px-3 py-1 rounded-lg text-xs font-black text-blue-900">
+                              {new Date(node.startMs).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })} · {formatTimeDisplay(node.idleStart)}
+                            </span>
                           </div>
                           <div className="flex items-center justify-between gap-4">
                             <span className="text-xs font-bold text-blue-600">Idle End</span>
-                            <span className="bg-blue-50 px-3 py-1 rounded-lg text-xs font-black text-blue-900">{formatTimeDisplay(node.idleEnd)}</span>
+                            <span className="bg-blue-50 px-3 py-1 rounded-lg text-xs font-black text-blue-900">
+                              {new Date(node.endMs).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })} · {formatTimeDisplay(node.idleEnd)}
+                            </span>
                           </div>
                         </div>
                       </div>

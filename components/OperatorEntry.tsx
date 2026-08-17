@@ -333,9 +333,13 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
         const relStart = Math.max(0, (startMs - dayStartMs) / 60000);
         const relEnd = Math.min(1440, (endMs - dayStartMs) / 60000);
         
-        // INTER-ACTIVITY LOSS EXCLUSION: Clip strictly to factory operational window
-        const s = Math.max(relStart, activeShiftBoundaries.s1Start); 
-        const e = Math.min(relEnd, activeShiftBoundaries.s2End || activeShiftBoundaries.s1End);
+        // INTER-ACTIVITY LOSS WINDOW
+        // 3-shift plants (Chakan chiller lines) are manned 24h on a working day,
+        // so the entire day counts as idle-capable time. Plants without a Shift 3
+        // (Ambernath) remain clipped to their operating window.
+        const is3Shift = activeShiftBoundaries.s3Start > 0;
+        const s = is3Shift ? relStart : Math.max(relStart, activeShiftBoundaries.s1Start);
+        const e = is3Shift ? relEnd : Math.min(relEnd, activeShiftBoundaries.s2End || activeShiftBoundaries.s1End);
         
         if (s < e) {
           let dailyWorkingMins = e - s;
@@ -491,42 +495,78 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
       }
 
       try {
-        const { data, error } = await supabase
+        // Fetch a recent window of completed activity rows and resolve the true
+        // chronological last end client-side. Ordering by end_time in SQL is wrong:
+        // it is a time-of-day value, so a Shift 2 boundary segment ending 23:30
+        // outranks the same activity's real Shift 3 end at 03:37 the next morning.
+        // The stored end_date is also unreliable on historical rows (all shift
+        // splits carry the activity's overall end date), so it is ignored here.
+        const { data: recentRows, error } = await supabase
           .from('production_entries')
-          .select('end_time, end_date, production_date, stage, is_gap')
+          .select('start_time, end_time, end_date, production_date, shift, stage, is_gap')
           .ilike('serial_no', cleanSerial)
           .eq('status', 'Completed')
           .neq('is_gap', true)
           .order('production_date', { ascending: false })
-          .order('end_time', { ascending: false })
-          .limit(1)
-          .maybeSingle();
+          .limit(200);
 
         if (!isActive) return;
 
-        if (data && !error && data.end_time) {
-          // Before setting lastLog, check if a gap record
-          // already exists starting from this same end_time.
-          // This prevents duplicate gaps when two activities
-          // are started in sequence after the same completed entry.
+        const pad2 = (n: number) => String(n).padStart(2, '0');
+
+        const resolveTrueEnd = (r: any) => {
+          const [y, mo, dd] = String(r.production_date || '').split('-').map(Number);
+          if (!y || !mo || !dd) return null;
+          const startHHMM = String(r.start_time || '00:00').slice(0, 5);
+          const endHHMM = String(r.end_time || '00:00').slice(0, 5);
+
+          // Shift 3 spans 23:30 -> 07:00 and is stamped with the shift-day.
+          // A Shift 3 segment starting before 07:00 belongs to the NEXT calendar day.
+          const base = new Date(y, mo - 1, dd);
+          if (r.shift === 'Shift 3' && startHHMM < '07:00') base.setDate(base.getDate() + 1);
+
+          // A segment whose end is at or before its start has wrapped past midnight.
+          const endDay = new Date(base);
+          if (endHHMM <= startHHMM) endDay.setDate(endDay.getDate() + 1);
+
+          const [eh, em] = endHHMM.split(':').map(Number);
+          endDay.setHours(eh || 0, em || 0, 0, 0);
+
+          return {
+            ms: endDay.getTime(),
+            endDateStr: `${endDay.getFullYear()}-${pad2(endDay.getMonth() + 1)}-${pad2(endDay.getDate())}`,
+            endTimeRaw: r.end_time,
+            stage: r.stage
+          };
+        };
+
+        const resolved = (recentRows || [])
+          .map(resolveTrueEnd)
+          .filter((x): x is { ms: number; endDateStr: string; endTimeRaw: string; stage: string } => !!x && !isNaN(x.ms))
+          .sort((a, b) => b.ms - a.ms);
+
+        const latest = resolved[0];
+
+        if (latest && !error) {
+          // Suppress if a gap has already been logged for this exact window.
           const { data: existingGap } = await supabase
             .from('production_entries')
             .select('id')
             .ilike('serial_no', cleanSerial)
             .eq('is_gap', true)
-            .eq('start_time', data.end_time)
+            .eq('start_time', latest.endTimeRaw)
+            .eq('production_date', latest.endDateStr)
             .maybeSingle();
 
           if (!isActive) return;
 
           if (existingGap) {
-            // Gap already logged for this window — suppress
             setLastLog(null);
           } else {
             setLastLog({
-              endTime: data.end_time,
-              endDate: data.end_date || data.production_date,
-              stageName: data.stage
+              endTime: latest.endTimeRaw,
+              endDate: latest.endDateStr,
+              stageName: latest.stage
             });
           }
         } else {
@@ -1073,6 +1113,18 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
           createdAt: new Date().toISOString()
         });
       } else {
+        // Each shift split ends on its own calendar date, not on the activity's
+        // overall end date. A segment whose end time is at or before its start
+        // time has wrapped past midnight and closes on the following day.
+        const segmentEndDate = (segDate: string, segStart: string, segEnd: string) => {
+          const [y, mo, dd] = String(segDate || '').split('-').map(Number);
+          if (!y || !mo || !dd) return segDate;
+          const d = new Date(y, mo - 1, dd);
+          if (String(segEnd).slice(0, 5) <= String(segStart).slice(0, 5)) d.setDate(d.getDate() + 1);
+          const p = (n: number) => String(n).padStart(2, '0');
+          return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+        };
+
         multiDaySplits.forEach((split, idx) => {
           const key = `${split.date}-${split.shift}`;
           const input = (assignmentInputs[key] as AssignmentInput);
@@ -1082,7 +1134,8 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
             id: idx === 0 ? activeInProgressEntry.id : getUUID(),
             plant: activeInProgressEntry.plant,
             stage, productLine, model, serialNo, unitSrNo, soSqNo,
-            productionDate: split.date, endDate: endDate,
+            productionDate: split.date,
+            endDate: segmentEndDate(split.date, split.segStart, split.segEnd),
             shift: split.shift, activity,
             manpower: input.count, manpowerNames: input.operators,
             assignments: [{
