@@ -385,15 +385,34 @@ const App: React.FC = () => {
           is_gap: newEntry.is_gap || false,
           user_email: session?.user?.email || 'unknown'
         };
-        if (newEntry.id && !isNaN(Number(newEntry.id))) {
-          entryData.id = Number(newEntry.id);
-        }
+        // FIX (D1): the `id` column is uuid, not numeric. The previous
+        // Number()/isNaN() guard ALWAYS failed for UUID strings, so no id was
+        // ever attached and every upsert silently degraded into a blind INSERT.
+        // Result: the original 'In Progress' row was never converted to
+        // 'Completed' and stayed open forever, allowing repeat commits.
+        // FIX: EVERY row must carry a valid uuid. Attaching `id` to only some
+        // rows put `id` into supabase-js's `columns` union, and PostgREST then
+        // sent NULL for the rows that lacked it — violating the NOT NULL
+        // constraint and rejecting the whole batch with HTTP 400.
+        // Reusing the In-Progress row's uuid converts it in place (UPDATE);
+        // a freshly generated uuid inserts a new row.
+        const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+        const freshUUID = () =>
+          (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function')
+            ? crypto.randomUUID()
+            : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+                const r = (Math.random() * 16) | 0;
+                return (c === 'x' ? r : ((r & 0x3) | 0x8)).toString(16);
+              });
+        const incomingId = newEntry.id ? String(newEntry.id).trim() : '';
+        entryData.id = UUID_RE.test(incomingId) ? incomingId : freshUUID();
         return entryData;
       });
       const { error } = await supabase.from('production_entries').upsert(upserts);
       if (error) throw error;
       if (newEntries.some(e => e.status === 'Completed')) setActiveTab('dashboard');
       fetchCloudData(); 
+      return true;
     } catch (e: any) {
       const msg = e.message?.toLowerCase() || '';
       if (msg.includes('token') || msg.includes('refresh') || msg.includes('jwt') || msg.includes('not found') || msg.includes('exp')) {
@@ -410,6 +429,7 @@ const App: React.FC = () => {
       } else {
         alert(`Terminal Sync Failure: ${e.message}. Please check your network connection.`);
       }
+      return false;
     } finally {
       setIsSyncing(false);
     }
@@ -451,7 +471,7 @@ const App: React.FC = () => {
         notes: updatedEntry.notes || '',
         status: updatedEntry.status,
         is_gap: updatedEntry.is_gap || false
-      }).eq('id', Number(updatedEntry.id));
+      }).eq('id', String(updatedEntry.id));
       if (error) throw error;
       fetchCloudData();
     } catch (e: any) {
@@ -474,7 +494,7 @@ const App: React.FC = () => {
     if (!confirm('Permanently delete record?')) return;
     setIsSyncing(true);
     try {
-      const { error } = await supabase.from('production_entries').delete().eq('id', Number(id));
+      const { error } = await supabase.from('production_entries').delete().eq('id', String(id));
       if (error) throw error;
       fetchCloudData();
     } catch (e: any) {

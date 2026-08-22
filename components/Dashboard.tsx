@@ -430,7 +430,18 @@ const Dashboard: React.FC<DashboardProps> = ({ entries, plant, userRole }) => {
     // Recalculate true start/end times for consolidated activities
     consolidatedActivities.forEach(a => {
       const firstShift = a.shifts.sort((s1: any, s2: any) => safeParseMs(s1.productionDate, s1.startTime) - safeParseMs(s2.productionDate, s2.startTime))[0];
-      const lastShift = a.shifts.find((s: any) => s.status === 'Completed') || a.shifts[a.shifts.length - 1];
+      // FIX: .find() returned the FIRST completed shift row, but a.shifts is
+      // sorted ascending by start time — so a multi-shift activity had its end
+      // recorded as the end of its FIRST segment. That made the remaining real
+      // work look like an unexplained window, producing a phantom
+      // "Inter-activity Idle Time" card and a wrong completion time in the
+      // activity header. Take the completed row with the LATEST end instead.
+      const completedShifts = a.shifts.filter((s: any) => s.status === 'Completed');
+      const lastShift = completedShifts.length > 0
+        ? completedShifts.reduce((latest: any, s: any) =>
+            safeParseMs(s.endDate || s.productionDate, s.endTime) >
+            safeParseMs(latest.endDate || latest.productionDate, latest.endTime) ? s : latest)
+        : a.shifts[a.shifts.length - 1];
       
       a.startTime = firstShift.startTime;
       a.date = firstShift.productionDate;

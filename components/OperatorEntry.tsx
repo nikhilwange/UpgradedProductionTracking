@@ -326,9 +326,20 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
     
     while (d <= endBoundary) {
       const dateStr = formatDateISO(d);
-      const isSunday = d.getDay() === 0;
-      
-      if (!isSunday && !HOLIDAYS_LIST.includes(dateStr)) {
+      // FIX: An inter-activity gap is bracketed by two REAL logged activities.
+      // If the previous activity ended on this date, or the next activity starts
+      // on it, the plant was demonstrably running and the Sunday/holiday calendar
+      // must not zero the window. Only fully intermediate days count as non-working.
+      // Previously a gap that began and ended on a Sunday or listed holiday
+      // returned 0 minutes, so no idle card appeared and no gap row was written,
+      // while the Dashboard's calendar-blind implicit-gap logic still showed it.
+      const isBoundaryDay =
+        dateStr === formatDateISO(new Date(startMs)) ||
+        dateStr === formatDateISO(new Date(endMs));
+      const isNonWorkingDay =
+        (d.getDay() === 0 || HOLIDAYS_LIST.includes(dateStr)) && !isBoundaryDay;
+
+      if (!isNonWorkingDay) {
         const dayStartMs = new Date(`${dateStr}T00:00:00`).getTime();
         const relStart = Math.max(0, (startMs - dayStartMs) / 60000);
         const relEnd = Math.min(1440, (endMs - dayStartMs) / 60000);
@@ -1030,7 +1041,9 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const isBlockingStart = !activeInProgressEntry && isAlreadyLogged;
-    if (!serialNo || isFetchingLastLog || isBlockingStart) return;
+    if (!serialNo) { alert("DIAG-A1: No serial number."); return; }
+    if (isFetchingLastLog) { alert("DIAG-A2: isFetchingLastLog is stuck TRUE — the unit-history lookup never completed. This is the blocker."); return; }
+    if (isBlockingStart) { alert("DIAG-A3: isAlreadyLogged blocked a commence."); return; }
 
     if (activeInProgressEntry) {
       // Check 1: All shifts have zero headcount
@@ -1161,7 +1174,25 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
         });
       }
 
-      await onAddEntry(entriesToSave);
+      if (entriesToSave.length === 0) {
+        alert(
+          "Nothing to save.\n\nNo shift segments were generated for this time range. " +
+          "Check that the completion date/time is after the commencement date/time and " +
+          "falls inside a working shift window."
+        );
+        setIsSubmitting(false);
+        return;
+      }
+
+      const saved = await onAddEntry(entriesToSave);
+      if (saved === false) {
+        // Save failed — keep the form populated so the operator can retry
+        // without re-entering everything. Previously the success overlay showed
+        // and the form cleared even when nothing was written.
+        setIsSubmitting(false);
+        return;
+      }
+
       setShowSuccessOverlay(true);
       setTimeout(() => setShowSuccessOverlay(false), 4000);
 
@@ -1177,6 +1208,12 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
         setStartTime(nowStr);
         setEndTime(nowStr);
       }
+    } catch (err: any) {
+      console.error('[PROTRACK COMMIT FAILURE]', err);
+      alert(
+        `DIAG-B: Commit threw an exception.\n\n${err?.name || 'Error'}: ${err?.message || String(err)}\n\n` +
+        `Full stack is in the browser console (F12).`
+      );
     } finally { setIsSubmitting(false); }
   };
   
