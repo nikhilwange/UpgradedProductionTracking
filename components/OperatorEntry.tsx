@@ -246,6 +246,8 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
 
   const [lastLog, setLastLog] = useState<{ endTime: string, endDate: string, stageName: string } | null>(null);
   const [hasOtherInProgress, setHasOtherInProgress] = useState(false);
+  const [isActivityCompletedInDb, setIsActivityCompletedInDb] = useState(false);
+  const [openActivityNames, setOpenActivityNames] = useState<string[]>([]);
   const [isFetchingLastLog, setIsFetchingLastLog] = useState(false);
   const [idleAttribution, setIdleAttribution] = useState({ affectedParameter: '', defectCategory: '', issueDescription: '' });
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -613,18 +615,31 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
       if (isActive) setIsFetchingLastLog(true);
 
       try {
-        // Check if THIS serial+activity is In Progress
-        const { data: inProgress, error: ipError } = await supabase
+        // A Completed (non-gap) row is a HARD LOCK on THIS activity only.
+        // Stale 'In Progress' rows from the pre-fix upsert bug are ignored
+        // when a Completed row exists. .maybeSingle() removed — two open rows
+        // used to throw PGRST116 and silently return null.
+        const { data: pairRows } = await supabase
           .from('production_entries')
           .select('*')
           .ilike('serial_no', cleanSerial)
           .eq('stage', cleanActivity)
-          .eq('status', 'In Progress')
-          .maybeSingle();
+          .eq('plant', context.plant)
+          .in('status', ['In Progress', 'Completed'])
+          .order('created_at', { ascending: false });
 
         if (!isActive) return;
 
-        if (inProgress && !ipError) {
+        const activityLocked = (pairRows || []).some(
+          r => r.status === 'Completed' && !r.is_gap
+        );
+        setIsActivityCompletedInDb(activityLocked);
+
+        const inProgress = activityLocked
+          ? null
+          : (pairRows || []).find(r => r.status === 'In Progress') || null;
+
+        if (inProgress) {
           setActiveInProgressEntry({
             id: String(inProgress.id),
             plant: inProgress.plant || 'CHAKAN',
@@ -704,10 +719,11 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
             allOtherEntries.filter(e => e.status === 'Completed').map(e => e.stage)
           );
           // A true in-progress activity has In Progress status but is NOT in the completed set
-          const trueInProgress = allOtherEntries.some(
-            e => e.status === 'In Progress' && !completedActivities.has(e.stage)
-          );
-          setHasOtherInProgress(trueInProgress);
+          const openOnes = allOtherEntries
+            .filter(e => e.status === 'In Progress' && !completedActivities.has(e.stage))
+            .map(e => String(e.stage));
+          setHasOtherInProgress(openOnes.length > 0);
+          setOpenActivityNames([...new Set(openOnes)]);
         } else {
           setHasOtherInProgress(false);
         }
@@ -1040,6 +1056,19 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    // Hard lock: this activity is already closed for this unit.
+    // NOTE: deliberately does NOT block starting a new activity while another
+    // is held open — that is a legitimate shop-floor workflow.
+    if (isActivityCompletedInDb) {
+      alert(
+        `ACTIVITY ALREADY COMPLETED\n\n` +
+        `"${activity}" is already closed for unit ${serialNo}.\n\n` +
+        `Please select the next activity. If this is genuinely incorrect, ` +
+        `ask your supervisor to raise an admin correction.`
+      );
+      return;
+    }
+
     const isBlockingStart = !activeInProgressEntry && isAlreadyLogged;
     if (!serialNo) { alert("DIAG-A1: No serial number."); return; }
     if (isFetchingLastLog) { alert("DIAG-A2: isFetchingLastLog is stuck TRUE — the unit-history lookup never completed. This is the blocker."); return; }
@@ -1395,10 +1424,29 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
             </div>
           </div>
 
-          {isAlreadyLogged && (
-            <div className="bg-amber-50 border border-amber-200 rounded-2xl p-6 flex items-start gap-4 animate-in fade-in duration-300">
-              <AlertCircle className="text-amber-500 shrink-0 mt-0.5" size={24} />
-              <div><h4 className="text-sm font-black text-amber-900 leading-tight mb-1">Activity Already Logged</h4><p className="text-xs font-bold text-emerald-700/80 leading-relaxed">The activity "{activity}" is already marked as completed for unit {serialNo}.</p></div>
+          {(isActivityCompletedInDb || isAlreadyLogged) && (
+            <div className="bg-rose-50 border-2 border-rose-300 rounded-2xl p-6 flex items-start gap-4 animate-in fade-in duration-300">
+              <AlertCircle className="text-rose-500 shrink-0 mt-0.5" size={24} />
+              <div>
+                <h4 className="text-sm font-black text-rose-900 leading-tight mb-1">Activity Closed — Entry Blocked</h4>
+                <p className="text-xs font-bold text-rose-700/90 leading-relaxed">
+                  "{activity}" is already completed for unit {serialNo}. Please select the next activity.
+                </p>
+              </div>
+            </div>
+          )}
+
+          {!isActivityCompletedInDb && openActivityNames.length > 0 && (
+            <div className="bg-sky-50 border border-sky-200 rounded-2xl p-6 flex items-start gap-4 animate-in fade-in duration-300">
+              <AlertCircle className="text-sky-500 shrink-0 mt-0.5" size={24} />
+              <div>
+                <h4 className="text-sm font-black text-sky-900 leading-tight mb-1">
+                  Other Activity Still Open — You Can Continue
+                </h4>
+                <p className="text-xs font-bold text-sky-700/90 leading-relaxed">
+                  Unit {serialNo} has {openActivityNames.length === 1 ? 'an activity' : 'activities'} commenced but not committed: {openActivityNames.join(', ')}. This does not block you — remember to close {openActivityNames.length === 1 ? 'it' : 'them'} later.
+                </p>
+              </div>
             </div>
           )}
 
@@ -1678,12 +1726,15 @@ const OperatorEntry: React.FC<OperatorEntryProps> = ({ onAddEntry, entries, plan
             disabled={
               isSubmitting || 
               isFetchingLastLog || 
+              isActivityCompletedInDb ||
               (!activeInProgressEntry && isAlreadyLogged) 
             } 
             className={`w-full py-5 rounded-[1.5rem] font-bold text-sm uppercase tracking-[0.1em] flex items-center justify-center gap-3 shadow-xl transition-all active:scale-[0.99] disabled:opacity-50 ${activeInProgressEntry ? 'bg-emerald-600 hover:bg-emerald-700 text-white' : 'bg-[#0f172a] hover:bg-slate-800 text-white'}`}
           >
             {isSubmitting || isFetchingLastLog ? <Loader2 size={18} className="animate-spin" /> : activeInProgressEntry ? <CheckCircle2 size={18} /> : <Send size={18} />} 
-            {activeInProgressEntry ? 'Commit Stage Data (Complete)' : 'Commence Activity (Start)'}
+            {isActivityCompletedInDb
+              ? 'Activity Already Completed — Select Next Activity'
+              : activeInProgressEntry ? 'Commit Stage Data (Complete)' : 'Commence Activity (Start)'}
           </button>
         </form>
       </div>
